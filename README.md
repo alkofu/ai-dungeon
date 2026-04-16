@@ -77,6 +77,19 @@ The project uses [Oxlint](https://oxc.rs/docs/guide/usage/linter) for linting an
 | `pnpm format`       | Format all files in-place        |
 | `pnpm format:check` | Check formatting without writing |
 
+## Testing
+
+See [TESTING.md](TESTING.md) for the full guide, including setup, configuration decisions, and coverage.
+
+| Command         | What it runs                                       |
+| --------------- | -------------------------------------------------- |
+| `pnpm test`     | Vitest — unit and component tests (single run)     |
+| `pnpm coverage` | Vitest — tests with V8 coverage report             |
+| `pnpm test:e2e` | Playwright — E2E tests against the Vite dev server |
+
+- **Unit/component tests** (Vitest + React Testing Library) live in `src/` alongside source files.
+- **E2E tests** (Playwright) live in `e2e/` and run against the Vite dev server, not the compiled Tauri backend.
+
 ## Build
 
 Produce a release binary (and `.app` bundle on macOS):
