@@ -4,21 +4,26 @@ Multi-workspace terminal for AI agents and CLIs.
 
 ## Tech Stack
 
-| Layer           | Technology                        |
-| --------------- | --------------------------------- |
-| Desktop shell   | [Tauri v2](https://v2.tauri.app/) |
-| Frontend        | React 19 + TypeScript             |
-| Bundler         | Vite 7                            |
-| Package manager | pnpm                              |
-| Backend         | Rust (Cargo)                      |
+| Layer           | Technology                                |
+| --------------- | ----------------------------------------- |
+| Desktop shell   | [Tauri v2](https://v2.tauri.app/)         |
+| Frontend        | React 19 + TypeScript                     |
+| UI library      | [Mantine v8](https://v8.mantine.dev/)     |
+| Bundler         | Vite 7 (PostCSS via `postcss.config.cjs`) |
+| Package manager | pnpm                                      |
+| Backend         | Rust (Cargo)                              |
 
 ## Project Structure
 
 ```
 ai-dungeon/
 ├── src/              # React + TypeScript frontend
-│   ├── main.tsx      # Entry point
-│   └── App.tsx       # Root component
+│   ├── main.tsx      # Entry point — mounts MantineProvider
+│   ├── App.tsx       # Root component — wrapped in AppLayout
+│   └── components/
+│       └── layout/
+│           ├── AppLayout.tsx  # AppShell layout (header, navbar, main)
+│           └── index.ts       # Barrel export
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point
