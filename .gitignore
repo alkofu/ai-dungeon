@@ -32,3 +32,8 @@ src-tauri/target/
 # Environment files
 .env
 .env.*
+
+# Testing
+coverage/
+test-results/
+playwright-report/
