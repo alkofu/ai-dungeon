@@ -4,13 +4,13 @@ Multi-workspace terminal for AI agents and CLIs.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Desktop shell | [Tauri v2](https://v2.tauri.app/) |
-| Frontend | React 19 + TypeScript |
-| Bundler | Vite 7 |
-| Package manager | pnpm |
-| Backend | Rust (Cargo) |
+| Layer           | Technology                        |
+| --------------- | --------------------------------- |
+| Desktop shell   | [Tauri v2](https://v2.tauri.app/) |
+| Frontend        | React 19 + TypeScript             |
+| Bundler         | Vite 7                            |
+| Package manager | pnpm                              |
+| Backend         | Rust (Cargo)                      |
 
 ## Project Structure
 
@@ -60,6 +60,17 @@ pnpm tauri dev
 ```
 
 The Vite dev server runs on port 1420. The Rust backend is compiled on first run, which takes a few minutes while Cargo downloads crates.
+
+### Code Quality
+
+The project uses [Oxlint](https://oxc.rs/docs/guide/usage/linter) for linting and [Oxfmt](https://oxc.rs/docs/guide/usage/formatter) for formatting.
+
+| Command             | Effect                           |
+| ------------------- | -------------------------------- |
+| `pnpm lint`         | Lint the codebase                |
+| `pnpm lint:fix`     | Lint and auto-fix violations     |
+| `pnpm format`       | Format all files in-place        |
+| `pnpm format:check` | Check formatting without writing |
 
 ## Build
 

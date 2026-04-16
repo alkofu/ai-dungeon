@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // NOTE: Setting the `plugins` field overwrites the base plugin set.
+  // `"eslint"` MUST be listed explicitly or all core ESLint-equivalent rules
+  // (no-debugger, no-dupe-keys, no-unreachable, etc.) will be silently disabled.
+  // This file uses JSONC syntax (allowComments: true, allowTrailingCommas: true
+  // per the oxlint configuration_schema.json).
+  "plugins": ["eslint", "typescript", "react", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    // react/exhaustive-deps has a known behavioral divergence from
+    // eslint-plugin-react-hooks. Set to warn to avoid false-positive failures.
+    "react/exhaustive-deps": "warn",
+    "react/jsx-no-target-blank": "error",
+    "react/no-direct-mutation-state": "error",
+    "react/jsx-key": "error",
+    // tsconfig.json already enforces noUnusedLocals and noUnusedParameters.
+    // Disabling here avoids duplicate diagnostics.
+    "no-unused-vars": "off",
+    // This project uses React 19 with the automatic JSX transform ("jsx": "react-jsx"
+    // in tsconfig.json), so importing React in every file is not required.
+    // react-in-jsx-scope is a false positive on all modern React projects using
+    // the new JSX runtime.
+    "react/react-in-jsx-scope": "off"
+  },
+  "settings": {
+    "react": {
+      // Oxlint infers JSX runtime mode from tsconfig.json ("jsx": "react-jsx").
+      // Only version is needed here.
+      "version": "19"
+    }
+  },
+  "ignorePatterns": ["dist/", "src-tauri/"]
+}
