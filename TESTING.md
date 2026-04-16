@@ -50,6 +50,12 @@ This downloads the Chromium browser binary. Without it, `pnpm test:e2e` will fai
 
 `pnpm coverage` generates HTML, text summary, and lcov reports in the `coverage/` directory using V8 native coverage (no instrumentation required). The `coverage/` directory is gitignored.
 
+## CI
+
+`pnpm lint`, `pnpm format:check`, and `pnpm test` run automatically on every pull request and push to `main` via the `check` job in `.github/workflows/test.yml`.
+
+Branch protection rules should be configured to require the `check` job before merging (follow-up item).
+
 ## Rust Tests (Future Work)
 
 The Rust backend (`src-tauri/`) is currently a bare scaffold with no IPC commands. Once Rust commands are added, standard `#[cfg(test)]` modules and `cargo test` will be used. No additional Rust test dependencies are needed.

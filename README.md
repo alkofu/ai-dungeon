@@ -90,6 +90,12 @@ See [TESTING.md](TESTING.md) for the full guide, including setup, configuration 
 - **Unit/component tests** (Vitest + React Testing Library) live in `src/` alongside source files.
 - **E2E tests** (Playwright) live in `e2e/` and run against the Vite dev server, not the compiled Tauri backend.
 
+## CI
+
+GitHub Actions runs lint, format check, and unit tests on every pull request and push to `main`. See [`.github/workflows/test.yml`](.github/workflows/test.yml) for the workflow definition.
+
+The Node.js version is pinned in [`.node-version`](.node-version) and read by both `actions/setup-node` and local tooling.
+
 ## Build
 
 Produce a release binary (and `.app` bundle on macOS):
