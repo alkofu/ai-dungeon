@@ -1,12 +1,18 @@
 import { AppShell, Burger, Group, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import type { ReactNode } from "react";
+import type { Card } from "../../types/card";
+import { NavBar } from "./NavBar";
 
+// cards props are required; only consumer is App.tsx (YAGNI — make optional if a second consumer is added)
 interface AppLayoutProps {
   children: ReactNode;
+  cards: Card[];
+  onAddCard: () => void;
+  onRemoveCard: (id: string) => void;
 }
 
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({ children, cards, onAddCard, onRemoveCard }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
 
   return (
@@ -27,7 +33,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
-        <p>Navbar content</p>
+        <NavBar cards={cards} onAddCard={onAddCard} onRemoveCard={onRemoveCard} />
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>
