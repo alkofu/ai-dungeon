@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./test-utils/render";
 import App from "./App";
 
@@ -14,5 +15,19 @@ describe("App", () => {
     expect(
       screen.getByText("Multi-workspace terminal for AI agents and CLIs."),
     ).toBeInTheDocument();
+  });
+
+  it("adds and removes a card via the navbar", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    const removeButton = screen.getByRole("button", { name: /Remove card/i });
+    expect(removeButton).toBeInTheDocument();
+
+    await user.click(removeButton);
+
+    expect(screen.queryByRole("button", { name: /Remove card/i })).toBeNull();
   });
 });
