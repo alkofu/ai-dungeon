@@ -24,6 +24,13 @@ export function AppLayout({ children, cards, onAddCard, onRemoveCard }: AppLayou
         collapsed: { desktop: !opened },
       }}
       padding="md"
+      styles={{
+        main: {
+          display: "flex",
+          flexDirection: "column",
+          height: "calc(100vh - var(--app-shell-header-height, 60px))",
+        },
+      }}
     >
       <AppShell.Header>
         <Group h="100%" px="md">

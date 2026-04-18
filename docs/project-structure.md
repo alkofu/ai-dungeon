@@ -3,20 +3,16 @@
 ```
 ai-dungeon/
 ├── src/              # React + TypeScript frontend
-│   ├── main.tsx      # Entry point — mounts MantineProvider
-│   ├── App.tsx       # Root component; owns card list state
-│   ├── App.test.tsx
-│   ├── types/
-│   │   └── card.ts   # Card interface (shared across components)
-│   ├── components/
-│   │   └── layout/
-│   │       ├── AppLayout.tsx  # AppShell layout; forwards card props to NavBar
-│   │       ├── NavBar.tsx     # Controlled card list — add/remove via callbacks
-│   │       ├── NavBar.test.tsx
-│   │       └── index.ts       # Barrel export
-│   └── test-utils/
-│       ├── render.tsx  # renderWithProviders helper (wraps MantineProvider)
-│       └── setup.ts    # Vitest setup file
+│   ├── main.tsx      # Entry point — mounts MantineProvider, imports xterm CSS
+│   ├── App.tsx       # Root component — wrapped in AppLayout
+│   └── components/
+│       ├── Terminal/
+│       │   ├── Terminal.tsx   # xterm.js wrapper — single instance, FitAddon, welcome banner
+│       │   ├── index.ts       # Barrel export
+│       │   └── Terminal.test.tsx
+│       └── layout/
+│           ├── AppLayout.tsx  # AppShell layout (header, navbar, main)
+│           └── index.ts       # Barrel export
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point

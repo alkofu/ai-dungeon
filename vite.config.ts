@@ -42,4 +42,8 @@ export default defineConfig({
       exclude: ["src/main.tsx", "src/vite-env.d.ts", "src/test-utils/**"],
     },
   },
+
+  optimizeDeps: {
+    include: ["@xterm/xterm", "@xterm/addon-fit"],
+  },
 });

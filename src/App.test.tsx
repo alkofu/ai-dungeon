@@ -1,20 +1,35 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./test-utils/render";
-import App from "./App";
+import { App } from "./App";
+
+// Mock xterm to avoid jsdom canvas/layout API issues
+vi.mock("@xterm/xterm", () => {
+  return {
+    Terminal: vi.fn().mockImplementation(function () {
+      return {
+        write: vi.fn(),
+        writeln: vi.fn(),
+        open: vi.fn(),
+        loadAddon: vi.fn(),
+        dispose: vi.fn(),
+      };
+    }),
+  };
+});
+
+vi.mock("@xterm/addon-fit", () => {
+  return {
+    FitAddon: vi.fn().mockImplementation(function () {
+      return { fit: vi.fn() };
+    }),
+  };
+});
 
 describe("App", () => {
-  it("renders the heading and description", () => {
+  it("renders the AppShell with terminal content", () => {
     renderWithProviders(<App />);
-
-    // AppLayout renders an <Title order={3}> ("AI Dungeon") in the header and
-    // App renders an <h1> ("AI Dungeon") in the main content area — both contain
-    // the same text. Target the <h1> specifically by role + level to avoid
-    // getByText ambiguity between the two "AI Dungeon" nodes.
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("AI Dungeon");
-    expect(
-      screen.getByText("Multi-workspace terminal for AI agents and CLIs."),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-root")).toBeInTheDocument();
   });
 
   it("adds and removes a card via the navbar", async () => {
