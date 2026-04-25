@@ -29,6 +29,12 @@ export function AppLayout({ children, cards, onAddCard, onRemoveCard }: AppLayou
           display: "flex",
           flexDirection: "column",
           height: "calc(100vh - var(--app-shell-header-height, 60px))",
+          // Required so AppShell.Main can flex-shrink within the AppShell flex
+          // column and not force the layout taller than the viewport. The
+          // Terminal div inside also has minHeight: 0 for the same reason at
+          // the next level of the flex chain — both are needed for height: 100%
+          // on the Terminal container to resolve to a definite non-zero value.
+          minHeight: 0,
         },
       }}
     >
