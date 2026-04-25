@@ -71,7 +71,14 @@ export function Terminal() {
         return;
       }
 
-      if (cancelled) return;
+      // If the component unmounted while pty_spawn was in flight, the cleanup
+      // function already fired pty_kill (which found no session yet and returned
+      // Ok). Now that the session exists on the backend, kill it explicitly so
+      // the shell + reader thread are not orphaned.
+      if (cancelled) {
+        void invoke("pty_kill", { sessionId });
+        return;
+      }
 
       // ── Listen for PTY output ───────────────────────────────────────────────
       // The payload is a base64-encoded string. We decode it to a Uint8Array
@@ -93,6 +100,10 @@ export function Terminal() {
 
       unlistenExit = await listen(`pty:exit:${sessionId}`, () => {
         term.writeln("\r\n[process exited]");
+        // Remove the dead session from the backend HashMap. pty_kill is
+        // idempotent (returns Ok when the session is absent), so this is safe
+        // even if cleanup has already run.
+        void invoke("pty_kill", { sessionId });
       });
 
       if (cancelled) return;

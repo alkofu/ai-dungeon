@@ -67,7 +67,7 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 3. **Terminal type** — Type `echo $TERM` and press Enter. Confirm the output is `xterm-256color`.
 4. **PTY dimensions** — Type `stty size` and press Enter. Confirm the output matches the visible terminal dimensions (rows × cols). Resize the window and run `stty size` again to confirm the dimensions update.
 5. **Shell exit** — Type `exit` and press Enter. Confirm `[process exited]` appears in the terminal and the shell does not auto-respawn.
-6. **Orphan check** — After the window is closed (or `exit` is run), verify no lingering shell processes remain: `ps aux | grep -v grep | grep "$(basename $SHELL)"` should not show a process owned by the app.
+6. **Orphan check** — First, _while the app is still running_, verify no zombie shell processes exist: `ps aux | grep -E "$(basename $SHELL).*defunct"` should return empty. Then close the app (or run `exit`) and confirm no lingering shell processes remain: `ps aux | grep -v grep | grep "$(basename $SHELL)"` should not show a process owned by the app.
 7. **Broken shell path** — In `src/components/Terminal/Terminal.tsx`, temporarily set the `pty_spawn` call to use an invalid shell path. Confirm the terminal displays `[failed to start shell: ...]` instead of crashing silently.
 8. **Binary paste** — Paste a chunk of text containing special characters (e.g. emoji, accented characters, or a long block of text). Confirm the characters arrive correctly in the shell without corruption or truncation.
 

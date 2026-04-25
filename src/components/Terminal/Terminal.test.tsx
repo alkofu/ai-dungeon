@@ -51,6 +51,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
+import { act } from "@testing-library/react";
 import { renderWithProviders } from "../../test-utils/render";
 import { Terminal } from "./Terminal";
 import { FitAddon } from "@xterm/addon-fit";
@@ -182,6 +183,41 @@ describe("Terminal", () => {
     // listen should NOT have been called because the IIFE returned early.
     const mockListen = listen as unknown as AnyMock;
     expect(mockListen).not.toHaveBeenCalled();
+  });
+
+  it("calls pty_kill when unmounted during in-flight spawn", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    // Capture the sessionId that will be generated for this render.
+    const expectedSessionId = "00000000-0000-0000-0000-000000000001";
+
+    // Set up a deferred spawn promise — resolves only when we call resolveSpawn().
+    let resolveSpawn!: () => void;
+    const spawnPromise = new Promise<void>((resolve) => {
+      resolveSpawn = resolve;
+    });
+
+    // First invoke call is pty_spawn; subsequent calls (pty_kill) resolve immediately.
+    mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+    const { unmount } = renderWithProviders(<Terminal />);
+
+    // Unmount before spawn resolves — cleanup fires pty_kill (no session yet).
+    act(() => {
+      unmount();
+    });
+
+    // Now resolve the spawn — the async IIFE resumes and must fire pty_kill again
+    // because `cancelled` is true.
+    await act(async () => {
+      resolveSpawn();
+      await spawnPromise;
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "pty_kill",
+      expect.objectContaining({ sessionId: expectedSessionId }),
+    );
   });
 
   it("calls FitAddon.fit on initial mount", () => {

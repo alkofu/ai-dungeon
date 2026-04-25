@@ -164,9 +164,10 @@ pub async fn pty_spawn(
 
 /// Write base64-encoded bytes to the PTY's input.
 ///
-/// Sync Tauri commands are dispatched on a worker thread pool, satisfying the
-/// no-async-runtime-blocking invariant.
-#[tauri::command]
+/// Dispatched off the main thread via `#[tauri::command(async)]`. Plain `fn`
+/// commands in Tauri 2 run on the main thread; the `async` annotation moves
+/// them to the blocking thread pool.
+#[tauri::command(async)]
 pub fn pty_write(
     state: State<'_, PtyState>,
     session_id: String,
@@ -203,9 +204,10 @@ pub fn pty_write(
 
 /// Resize the PTY.
 ///
-/// Sync Tauri commands are dispatched on a worker thread pool, satisfying the
-/// no-async-runtime-blocking invariant.
-#[tauri::command]
+/// Dispatched off the main thread via `#[tauri::command(async)]`. Plain `fn`
+/// commands in Tauri 2 run on the main thread; the `async` annotation moves
+/// them to the blocking thread pool.
+#[tauri::command(async)]
 pub fn pty_resize(
     state: State<'_, PtyState>,
     session_id: String,
@@ -259,6 +261,12 @@ pub fn pty_kill(state: State<'_, PtyState>, session_id: String) -> Result<(), St
     // Kill the child process; ignore AlreadyExited.
     if let Ok(mut child) = session.child.lock() {
         let _ = child.kill();
+        // On Unix, a process that exits without being waited becomes a zombie
+        // until the parent calls waitpid.
+        // `kill()` terminates the child; `wait()` reaps it. `wait()` returns
+        // immediately if the child already exited.
+        // Reap the child to avoid zombie processes on Unix (POSIX waitpid semantics).
+        let _ = child.wait();
     }
 
     Ok(())
