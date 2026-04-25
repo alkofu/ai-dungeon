@@ -37,3 +37,6 @@ src-tauri/target/
 coverage/
 test-results/
 playwright-report/
+
+# AI tooling
+.worktrees/
