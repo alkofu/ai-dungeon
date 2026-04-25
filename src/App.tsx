@@ -18,7 +18,7 @@ type AppAction =
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
-function appReducer(state: AppState, action: AppAction): AppState {
+export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "add": {
       const newCard: Card = { id: globalThis.crypto.randomUUID() };

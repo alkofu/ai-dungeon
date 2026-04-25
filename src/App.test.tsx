@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./test-utils/render";
-import { App } from "./App";
+import { App, appReducer } from "./App";
 import { invoke } from "@tauri-apps/api/core";
 
 // Mock xterm to avoid jsdom canvas/layout API issues
@@ -244,5 +244,19 @@ describe("App", () => {
 
     // The tab must remain selected — null must be ignored.
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("appReducer", () => {
+  it("activate ignores null while cards exist", () => {
+    const card = { id: "test-uuid-1" };
+    const state = { cards: [card], activeId: "test-uuid-1" };
+    expect(appReducer(state, { type: "activate", id: null })).toBe(state); // referential equality
+  });
+
+  it("activate accepts null when no cards exist", () => {
+    const state = { cards: [], activeId: null };
+    const result = appReducer(state, { type: "activate", id: null });
+    expect(result).toEqual({ cards: [], activeId: null });
   });
 });
