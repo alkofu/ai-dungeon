@@ -16,3 +16,50 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+// --- xterm.js jsdom stubs ---
+// xterm requires HTMLCanvasElement.getContext and ResizeObserver, which jsdom does not implement.
+// These stubs prevent 'not implemented' errors during unit tests.
+
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  value: vi.fn(() => ({
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+    putImageData: vi.fn(),
+    createImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
+    setTransform: vi.fn(),
+    drawImage: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    scale: vi.fn(),
+    rotate: vi.fn(),
+    translate: vi.fn(),
+    transform: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    closePath: vi.fn(),
+    stroke: vi.fn(),
+    fill: vi.fn(),
+    fillText: vi.fn(),
+    measureText: vi.fn(() => ({ width: 0 })),
+    rect: vi.fn(),
+    clip: vi.fn(),
+    arc: vi.fn(),
+    font: "",
+    fillStyle: "",
+    strokeStyle: "",
+    textBaseline: "",
+  })),
+  writable: true,
+  configurable: true,
+});
+
+globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+  return {
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  };
+}) as unknown as typeof ResizeObserver;
