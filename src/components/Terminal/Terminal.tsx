@@ -69,8 +69,8 @@ export function Terminal() {
         pendingWrites.push(data);
         return;
       }
-      const data_b64 = encodeBase64(data);
-      invoke("pty_write", { sessionId, data_b64 }).catch((err) => {
+      const dataB64 = encodeBase64(data);
+      invoke("pty_write", { sessionId, dataB64 }).catch((err) => {
         // Guard with `cancelled` for defence-in-depth: onDataDisposable.dispose()
         // prevents new callbacks from firing after unmount, but in-flight invoke()
         // promises that were already initiated before dispose() can still settle.
@@ -166,8 +166,8 @@ export function Terminal() {
         // (F-2: this ordering is load-bearing for the .catch guard below.)
         if (cancelled) break;
         const data = pendingWrites.shift()!;
-        const data_b64 = encodeBase64(data);
-        invoke("pty_write", { sessionId, data_b64 }).catch((err) => {
+        const dataB64 = encodeBase64(data);
+        invoke("pty_write", { sessionId, dataB64 }).catch((err) => {
           // Guard with `cancelled` because term may be disposed by the time
           // this .catch fires (cleanup sets cancelled = true before term.dispose()).
           if (!cancelled) {

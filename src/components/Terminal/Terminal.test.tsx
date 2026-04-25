@@ -153,7 +153,7 @@ describe("Terminal", () => {
     await vi.waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("pty_write", {
         sessionId: "00000000-0000-0000-0000-000000000001",
-        data_b64: "YQ==",
+        dataB64: "YQ==",
       });
     });
   });
@@ -377,7 +377,7 @@ describe("Terminal", () => {
     await vi.waitFor(() => {
       const ptyWriteCalls = mockInvoke.mock.calls
         .filter((c: unknown[]) => c[0] === "pty_write")
-        .map((c: unknown[]) => (c[1] as { data_b64: string }).data_b64);
+        .map((c: unknown[]) => (c[1] as { dataB64: string }).dataB64);
       expect(ptyWriteCalls).toEqual(["YQ==", "Yg==", "Yw=="]);
     });
   });
