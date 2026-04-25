@@ -58,6 +58,19 @@ This downloads the Chromium browser binary. Without it, `pnpm test:e2e` will fai
 
 `pnpm coverage` generates HTML, text summary, and lcov reports in the `coverage/` directory using V8 native coverage (no instrumentation required). The `coverage/` directory is gitignored.
 
+## Manual PTY Verification
+
+After `pnpm tauri dev` opens the app window, perform the following checks to confirm the real PTY integration is working end-to-end.
+
+1. **Basic shell interaction** — Type `pwd` and press Enter. Confirm the current working directory is printed (should be your home directory).
+2. **Shell identity** — Type `echo $SHELL` and press Enter. Confirm the output matches your default shell (e.g. `/bin/zsh` or `/bin/bash`).
+3. **Terminal type** — Type `echo $TERM` and press Enter. Confirm the output is `xterm-256color`.
+4. **PTY dimensions** — Type `stty size` and press Enter. Confirm the output matches the visible terminal dimensions (rows × cols). Resize the window and run `stty size` again to confirm the dimensions update.
+5. **Shell exit** — Type `exit` and press Enter. Confirm `[process exited]` appears in the terminal and the shell does not auto-respawn.
+6. **Orphan check** — First, _while the app is still running_, verify no zombie shell processes exist: `ps aux | grep -E "$(basename $SHELL).*defunct"` should return empty. Then close the app (or run `exit`) and confirm no lingering shell processes remain: `ps aux | grep -v grep | grep "$(basename $SHELL)"` should not show a process owned by the app.
+7. **Broken shell path** — In `src/components/Terminal/Terminal.tsx`, temporarily set the `pty_spawn` call to use an invalid shell path. Confirm the terminal displays `[failed to start shell: ...]` instead of crashing silently.
+8. **Binary paste** — Paste a chunk of text containing special characters (e.g. emoji, accented characters, or a long block of text). Confirm the characters arrive correctly in the shell without corruption or truncation.
+
 ## CI
 
 `pnpm lint`, `pnpm format:check`, and `pnpm test` run automatically on every pull request and push to `main` via the `check` job in `.github/workflows/test.yml`.
@@ -66,4 +79,4 @@ Branch protection rules should be configured to require the `check` job before m
 
 ## Rust Tests (Future Work)
 
-The Rust backend (`src-tauri/`) is currently a bare scaffold with no IPC commands. Once Rust commands are added, standard `#[cfg(test)]` modules and `cargo test` will be used. No additional Rust test dependencies are needed.
+The Rust backend (`src-tauri/`) exposes four PTY commands — `pty_spawn`, `pty_write`, `pty_resize`, and `pty_kill` — implemented in `src-tauri/src/pty.rs`. Unit tests for these commands require a real PTY device, which is unavailable in most CI environments and non-trivial to mock at the `portable-pty` trait boundary. Rust unit tests for the PTY layer are therefore deferred as future work. When added, they will use standard `#[cfg(test)]` modules and `cargo test`. No additional Rust test dependencies are anticipated.
