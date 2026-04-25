@@ -27,11 +27,58 @@ export function Terminal() {
     // Collect the onData disposable for cleanup.
     let onDataDisposable: { dispose: () => void } | undefined;
 
+    // Buffer for keystrokes that arrive before the PTY is ready. Each entry is
+    // a discrete xterm onData string and is encoded + sent independently to
+    // preserve per-keystroke handling semantics.
+    const pendingWrites: string[] = [];
+
     // ── Terminal & FitAddon ───────────────────────────────────────────────────
     const term = new XTerm();
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
+
+    // ── encodeBase64 helper ───────────────────────────────────────────────────
+    // Encodes a xterm data string to UTF-8 bytes, then base64. Returns the
+    // base64 string.
+    //
+    // btoa() is called once on the fully concatenated `bin` string (not per
+    // chunk). Chunking exists solely to avoid stack overflow in
+    // String.fromCharCode.apply, which has a call-stack limit on large arrays.
+    const encoder = new TextEncoder();
+    function encodeBase64(data: string): string {
+      const bytes = encoder.encode(data);
+      // Chunked base64 encoding to handle large paste payloads safely.
+      // String.fromCharCode.apply has a stack limit; process in 8 KiB chunks.
+      const CHUNK = 8192;
+      let bin = "";
+      for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+        const chunk = bytes.subarray(offset, offset + CHUNK);
+        bin += String.fromCharCode.apply(null, chunk as unknown as number[]);
+      }
+      return btoa(bin);
+    }
+
+    // ── Register onData synchronously ─────────────────────────────────────────
+    // Registered here (before fitAddon.fit() and before the async IIFE) so that
+    // keystrokes typed during the spawn window are captured rather than dropped.
+    // While isReadyRef.current is false, keystrokes are buffered into
+    // pendingWrites. Once the PTY is ready, keystrokes are forwarded live.
+    onDataDisposable = term.onData((data) => {
+      if (!isReadyRef.current) {
+        pendingWrites.push(data);
+        return;
+      }
+      const data_b64 = encodeBase64(data);
+      invoke("pty_write", { sessionId, data_b64 }).catch((err) => {
+        // Guard with `cancelled` for defence-in-depth: onDataDisposable.dispose()
+        // prevents new callbacks from firing after unmount, but in-flight invoke()
+        // promises that were already initiated before dispose() can still settle.
+        if (!cancelled) {
+          term.writeln(`\r\n[pty write failed: ${String(err)}]`);
+        }
+      });
+    });
 
     // FitAddon.fit() returns silently when dimensions are zero (not a throw).
     fitAddon.fit();
@@ -108,32 +155,40 @@ export function Terminal() {
 
       if (cancelled) return;
 
-      // ── Register onData: forward keystrokes to the PTY ─────────────────────
-      // Encode the xterm string to UTF-8 bytes via TextEncoder, then base64.
-      // This guarantees binary fidelity for alt-key sequences, mouse reporting,
-      // paste of binary content, and non-UTF-8 readline responses. (M-4)
-      const encoder = new TextEncoder();
-      onDataDisposable = term.onData((data) => {
-        const bytes = encoder.encode(data);
-        // Chunked base64 encoding to handle large paste payloads safely.
-        // String.fromCharCode.apply has a stack limit; process in 8 KiB chunks.
-        const CHUNK = 8192;
-        let bin = "";
-        for (let offset = 0; offset < bytes.length; offset += CHUNK) {
-          const chunk = bytes.subarray(offset, offset + CHUNK);
-          bin += String.fromCharCode.apply(null, chunk as unknown as number[]);
-        }
-        const data_b64 = btoa(bin);
-
-        void invoke("pty_write", { sessionId, data_b64 });
-      });
+      // ── Flush buffered pre-ready keystrokes ────────────────────────────────
+      // Drain pendingWrites in FIFO order before setting isReadyRef.current.
+      // The loop body is fully synchronous, so no keystroke event can interleave
+      // between iterations. Setting isReadyRef.current after the flush ensures
+      // live writes begin only after all buffered ones are sent.
+      while (pendingWrites.length > 0) {
+        // Check cancelled at the top of each iteration to avoid issuing
+        // redundant pty_write IPC calls to a session being concurrently killed.
+        // (F-2: this ordering is load-bearing for the .catch guard below.)
+        if (cancelled) break;
+        const data = pendingWrites.shift()!;
+        const data_b64 = encodeBase64(data);
+        invoke("pty_write", { sessionId, data_b64 }).catch((err) => {
+          // Guard with `cancelled` because term may be disposed by the time
+          // this .catch fires (cleanup sets cancelled = true before term.dispose()).
+          if (!cancelled) {
+            term.writeln(`\r\n[pty write failed: ${String(err)}]`);
+          }
+        });
+      }
 
       isReadyRef.current = true;
     })();
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     return () => {
+      // Set cancelled = true BEFORE term.dispose() so that any in-flight
+      // pty_write .catch callbacks (flush-loop path) see cancelled = true and
+      // skip the term.writeln call on the already-disposed terminal.
+      // This ordering is load-bearing for the cancelled guard in the flush loop.
       cancelled = true;
+      // Clear the pending queue so a remount does not replay stale input from
+      // this unmounted instance.
+      pendingWrites.length = 0;
       observer.disconnect();
       onDataDisposable?.dispose();
       unlistenOutput?.();
@@ -148,6 +203,13 @@ export function Terminal() {
   // The cleanup (dispose + disconnect) handles this correctly.
   // In DevTools, verify that exactly one element with data-testid="terminal-root"
   // exists after initial render.
+  //
+  // Note on minHeight: 0 here vs. AppShell.Main:
+  // - AppShell.Main has minHeight: 0 so it can flex-shrink within the AppShell
+  //   flex column and not overflow the viewport.
+  // - This inner div has minHeight: 0 so it can flex-shrink within AppShell.Main
+  //   (which itself is a flex column). Both are required for height: 100% on this
+  //   div to resolve to a definite non-zero value.
   return (
     <div
       ref={containerRef}

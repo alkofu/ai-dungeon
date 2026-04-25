@@ -81,6 +81,12 @@ describe("Terminal", () => {
     // Clear captured unlisten spies from the previous test.
     unlistenSpies.length = 0;
 
+    // Restore invoke to its default behavior (resolves immediately) so that
+    // tests which set a persistent mockImplementation (e.g. the "does NOT call
+    // pty_resize before spawn completes" test) do not leak state into later
+    // tests. vi.clearAllMocks() only clears call history, not implementations.
+    (invoke as unknown as AnyMock).mockResolvedValue(undefined);
+
     // Restore a fresh ResizeObserver spy for each test.
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
       return {
@@ -123,9 +129,19 @@ describe("Terminal", () => {
   it("registers onData handler and forwards input as base64 via pty_write", async () => {
     renderWithProviders(<Terminal />);
 
-    // Wait for the IIFE to complete (isReadyRef set, onData registered).
+    // After the refactor, onData is registered synchronously at mount (before
+    // fitAddon.fit()). Wait for it to have been registered.
     await vi.waitFor(() => {
       expect(onDataSpy).toHaveBeenCalled();
+    });
+
+    // The callback is registered immediately but forwards keystrokes only once
+    // isReadyRef.current is true (after spawn + listen calls resolve). Wait for
+    // listen() to have been called before extracting and invoking the callback,
+    // so that we exercise the live-path (not the buffering path).
+    const mockListen = listen as unknown as AnyMock;
+    await vi.waitFor(() => {
+      expect(mockListen).toHaveBeenCalledTimes(2);
     });
 
     // Extract the onData callback and simulate a keystroke ('a').
@@ -239,9 +255,12 @@ describe("Terminal", () => {
 
     renderWithProviders(<Terminal />);
 
-    // Wait for spawn to complete so isReadyRef.current = true.
+    // After the refactor, onData is registered synchronously (before spawn).
+    // Wait for both listen() calls to resolve, which confirms isReadyRef.current
+    // has been set to true (spawn + subscriptions complete).
+    const mockListen = listen as unknown as AnyMock;
     await vi.waitFor(() => {
-      expect(onDataSpy).toHaveBeenCalled();
+      expect(mockListen).toHaveBeenCalledTimes(2);
     });
 
     // Trigger a resize after ready.
@@ -308,5 +327,201 @@ describe("Terminal", () => {
       MockResizeObserver.mock.results[MockResizeObserver.mock.results.length - 1].value;
     expect(termInstance.dispose).toHaveBeenCalledTimes(1);
     expect(observerInstance.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Pre-ready keystroke buffering ─────────────────────────────────────────
+
+  it("buffers keystrokes typed before spawn completes and flushes them in order after spawn resolves", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    // Deferred spawn: resolves only when we call resolveSpawn().
+    let resolveSpawn!: () => void;
+    const spawnPromise = new Promise<void>((resolve) => {
+      resolveSpawn = resolve;
+    });
+
+    // First invoke call is pty_spawn; all subsequent calls resolve immediately.
+    mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+    renderWithProviders(<Terminal />);
+
+    // onData is now registered synchronously — wait for registration.
+    await vi.waitFor(() => {
+      expect(onDataSpy).toHaveBeenCalled();
+    });
+
+    // Extract the callback (registered before spawn resolves — buffering path).
+    const onDataCallback = onDataSpy.mock.calls[onDataSpy.mock.calls.length - 1][0] as (
+      data: string,
+    ) => void;
+
+    // Type three keys before spawn resolves.
+    onDataCallback("a");
+    onDataCallback("b");
+    onDataCallback("c");
+
+    // pty_write must NOT have been called yet — keystrokes are buffered.
+    const ptyWriteCallsBefore = mockInvoke.mock.calls.filter(
+      (c: unknown[]) => c[0] === "pty_write",
+    );
+    expect(ptyWriteCallsBefore).toHaveLength(0);
+
+    // Resolve spawn and wait for the flush loop to drain.
+    await act(async () => {
+      resolveSpawn();
+      await spawnPromise;
+    });
+
+    // After spawn + listen calls complete, all three buffered keystrokes must
+    // have been flushed to pty_write in FIFO order.
+    await vi.waitFor(() => {
+      const ptyWriteCalls = mockInvoke.mock.calls
+        .filter((c: unknown[]) => c[0] === "pty_write")
+        .map((c: unknown[]) => (c[1] as { data_b64: string }).data_b64);
+      expect(ptyWriteCalls).toEqual(["YQ==", "Yg==", "Yw=="]);
+    });
+  });
+
+  it("does not replay buffered keystrokes if the component unmounts before spawn completes", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    // Deferred spawn.
+    let resolveSpawn!: () => void;
+    const spawnPromise = new Promise<void>((resolve) => {
+      resolveSpawn = resolve;
+    });
+
+    mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+    const { unmount } = renderWithProviders(<Terminal />);
+
+    // Wait for synchronous onData registration.
+    await vi.waitFor(() => {
+      expect(onDataSpy).toHaveBeenCalled();
+    });
+
+    const onDataCallback = onDataSpy.mock.calls[onDataSpy.mock.calls.length - 1][0] as (
+      data: string,
+    ) => void;
+
+    // Buffer a keystroke before spawn resolves.
+    onDataCallback("x");
+
+    // Unmount before spawn resolves — cleanup fires, pendingWrites is cleared.
+    act(() => {
+      unmount();
+    });
+
+    // Now resolve spawn — the IIFE resumes but cancelled is true; flush loop
+    // checks cancelled and breaks immediately without calling pty_write.
+    await act(async () => {
+      resolveSpawn();
+      await spawnPromise;
+    });
+
+    // pty_write must NEVER have been called.
+    const ptyWriteCalls = mockInvoke.mock.calls.filter((c: unknown[]) => c[0] === "pty_write");
+    expect(ptyWriteCalls).toHaveLength(0);
+  });
+
+  // ── pty_write error surfacing ─────────────────────────────────────────────
+
+  it("surfaces pty_write errors via term.writeln", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    renderWithProviders(<Terminal />);
+
+    // Wait for the PTY to be ready (both listen() calls resolved).
+    const mockListen = listen as unknown as AnyMock;
+    await vi.waitFor(() => {
+      expect(mockListen).toHaveBeenCalledTimes(2);
+    });
+
+    const termInstance = getTermInstance();
+
+    // Configure the next pty_write call to reject.
+    mockInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === "pty_write") return Promise.reject(new Error("write failed"));
+      return Promise.resolve(undefined);
+    });
+
+    // Extract the onData callback and trigger a keystroke on the live path.
+    const onDataCallback = onDataSpy.mock.calls[onDataSpy.mock.calls.length - 1][0] as (
+      data: string,
+    ) => void;
+    onDataCallback("a");
+
+    // The .catch handler must surface the error via term.writeln.
+    await vi.waitFor(() => {
+      expect(termInstance.writeln).toHaveBeenCalledWith(
+        expect.stringContaining("[pty write failed:"),
+      );
+    });
+    expect(termInstance.writeln).toHaveBeenCalledWith(expect.stringContaining("write failed"));
+  });
+
+  it("does not call term.writeln on pty_write error after unmount (flush-path .catch cancelled guard)", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    // Deferred spawn so we can queue a keystroke before spawn resolves.
+    let resolveSpawn!: () => void;
+    const spawnPromise = new Promise<void>((resolve) => {
+      resolveSpawn = resolve;
+    });
+
+    mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+    const { unmount } = renderWithProviders(<Terminal />);
+
+    // Wait for synchronous onData registration.
+    await vi.waitFor(() => {
+      expect(onDataSpy).toHaveBeenCalled();
+    });
+
+    const onDataCallback = onDataSpy.mock.calls[onDataSpy.mock.calls.length - 1][0] as (
+      data: string,
+    ) => void;
+
+    // Queue a keystroke before spawn resolves — it will be flushed after spawn.
+    onDataCallback("a");
+
+    const termInstance = getTermInstance();
+
+    // Set up a deferred pty_write rejection that we control manually.
+    let rejectPtyWrite!: (err: Error) => void;
+    const ptyWritePromise = new Promise<void>((_, reject) => {
+      rejectPtyWrite = reject;
+    });
+
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "pty_write") return ptyWritePromise;
+      return Promise.resolve(undefined);
+    });
+
+    // Resolve spawn — flush loop runs, calls pty_write (promise is still pending).
+    await act(async () => {
+      resolveSpawn();
+      await spawnPromise;
+    });
+
+    // Unmount BEFORE settling the pty_write rejection — cancelled becomes true.
+    act(() => {
+      unmount();
+    });
+
+    // Now reject pty_write — the .catch fires with cancelled=true.
+    await act(async () => {
+      rejectPtyWrite(new Error("write failed"));
+      await ptyWritePromise.catch(() => {
+        /* expected rejection, suppress unhandled-rejection noise */
+      });
+    });
+
+    // The flush-path .catch must NOT call writeln because cancelled is true.
+    expect(termInstance.writeln).not.toHaveBeenCalledWith(
+      expect.stringContaining("[pty write failed:"),
+    );
+    // Dispose must have been called exactly once.
+    expect(termInstance.dispose).toHaveBeenCalledTimes(1);
   });
 });
