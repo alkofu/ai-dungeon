@@ -222,4 +222,27 @@ describe("App", () => {
     // Burger button still renders regardless of card state.
     expect(screen.getByRole("button", { name: "Toggle navigation" })).toBeInTheDocument();
   });
+
+  it("ignores onChange(null) from Mantine Tabs while cards exist (null-guard)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    // Add a card so there is an active tab.
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(1);
+    // The newly added card should be active.
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+
+    // Simulate Mantine Tabs calling onChange(null) by finding the tablist and
+    // firing a custom onChange event. We do this by directly invoking the
+    // internal prop. Since we can't easily reach the Tabs root onChange, we
+    // verify the guard indirectly: clicking the already-active tab causes
+    // Mantine to call onChange(null), and the tab should remain selected.
+    await user.click(tabs[0]);
+
+    // The tab must remain selected — null must be ignored.
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+  });
 });

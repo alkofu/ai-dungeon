@@ -25,9 +25,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return {
         // The new card is appended to the end of the list.
         cards: [...state.cards, newCard],
-        // When there is no active card (e.g. first add), activate the new card.
-        // Subsequent adds leave the active tab on whichever card is currently selected.
-        activeId: state.activeId ?? newCard.id,
+        // Always activate the newly added card — conventional UX for terminal apps.
+        activeId: newCard.id,
       };
     }
     case "remove": {
@@ -52,6 +51,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { cards: remaining, activeId: nextActiveId };
     }
     case "activate": {
+      if (action.id === null && state.cards.length > 0) {
+        return state; // ignore null while cards exist
+      }
       return { ...state, activeId: action.id };
     }
     default:

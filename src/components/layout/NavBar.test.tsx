@@ -26,11 +26,11 @@ describe("NavBar", () => {
 
   it("renders provided cards with remove buttons", () => {
     renderNavBar(
-      <NavBar cards={[{ id: "a" }, { id: "b" }]} onAddCard={vi.fn()} onRemoveCard={vi.fn()} />,
+      <NavBar cards={[{ id: "abcdefgh" }, { id: "12345678" }]} onAddCard={vi.fn()} onRemoveCard={vi.fn()} />,
     );
 
-    expect(screen.getByRole("button", { name: "Remove card a" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Remove card b" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove card abcdefgh" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove card 12345678" })).toBeInTheDocument();
   });
 
   it("calls onAddCard when the Add card button is clicked", async () => {
@@ -55,6 +55,22 @@ describe("NavBar", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Remove card a" }));
+
+    expect(onRemoveCard).toHaveBeenCalledTimes(1);
+    expect(onRemoveCard).toHaveBeenCalledWith("a");
+  });
+
+  it("calls onRemoveCard when Enter is pressed on the close button (keyboard a11y)", async () => {
+    const onRemoveCard = vi.fn();
+    const user = userEvent.setup();
+
+    renderNavBar(
+      <NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} />,
+    );
+
+    const closeButton = screen.getByRole("button", { name: "Remove card a" });
+    closeButton.focus();
+    await user.keyboard("{Enter}");
 
     expect(onRemoveCard).toHaveBeenCalledTimes(1);
     expect(onRemoveCard).toHaveBeenCalledWith("a");

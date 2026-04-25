@@ -1,4 +1,4 @@
-import { AppShell, Burger, Group, Tabs, Title } from "@mantine/core";
+import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import type { Card } from "../../types/card";
 import { NavBar } from "./NavBar";
@@ -77,9 +77,9 @@ export function AppLayout({
         <AppShell.Main>
           {cards.length === 0 ? (
             // Empty state: no cards, no terminals.
-            <span data-testid="main-empty-state">
+            <Text data-testid="main-empty-state" c="dimmed">
               No card selected. Click + in the sidebar to add one.
-            </span>
+            </Text>
           ) : (
             cards.map((card) => (
               // flex: 1, minHeight: 0 rather than height: 100% because AppShell.Main

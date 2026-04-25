@@ -38,7 +38,7 @@ export function NavBar({ cards, onAddCard, onRemoveCard }: NavBarProps) {
                 <ActionIcon
                   component="div"
                   role="button"
-                  aria-label={`Remove card ${card.id}`}
+                  aria-label={`Remove card ${card.id.slice(0, 8)}`}
                   variant="subtle"
                   size="xs"
                   tabIndex={0}
@@ -47,6 +47,13 @@ export function NavBar({ cards, onAddCard, onRemoveCard }: NavBarProps) {
                     // briefly activate the deleted tab before the card is removed.
                     event.stopPropagation();
                     onRemoveCard(card.id);
+                  }}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRemoveCard(card.id);
+                    }
                   }}
                 >
                   ×
