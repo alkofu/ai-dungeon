@@ -95,15 +95,10 @@ describe("Terminal", () => {
         disconnect: vi.fn(),
       };
     }) as unknown as typeof ResizeObserver;
-
-    // Stable UUID for deterministic session ID matching.
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
-      "00000000-0000-0000-0000-000000000001",
-    );
   });
 
   it("calls pty_spawn with sessionId, cols, and rows on mount", async () => {
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     // Allow the async IIFE to run.
     await vi.waitFor(() => {
@@ -116,7 +111,7 @@ describe("Terminal", () => {
   });
 
   it("calls listen for pty:output and pty:exit events after spawn", async () => {
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     await vi.waitFor(() => {
       const mockListen = listen as unknown as AnyMock;
@@ -127,7 +122,7 @@ describe("Terminal", () => {
   });
 
   it("registers onData handler and forwards input as base64 via pty_write", async () => {
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     // After the refactor, onData is registered synchronously at mount (before
     // fitAddon.fit()). Wait for it to have been registered.
@@ -159,7 +154,9 @@ describe("Terminal", () => {
   });
 
   it("disposes onData, calls unlistens, and invokes pty_kill on unmount", async () => {
-    const { unmount } = renderWithProviders(<Terminal />);
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
 
     // Wait for both listen() calls to have resolved and stored their spies.
     await vi.waitFor(() => {
@@ -187,7 +184,7 @@ describe("Terminal", () => {
     const mockInvoke = invoke as unknown as AnyMock;
     mockInvoke.mockRejectedValueOnce(new Error("shell not found"));
 
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     const termInstance = getTermInstance();
     await vi.waitFor(() => {
@@ -216,7 +213,9 @@ describe("Terminal", () => {
     // First invoke call is pty_spawn; subsequent calls (pty_kill) resolve immediately.
     mockInvoke.mockImplementationOnce(() => spawnPromise);
 
-    const { unmount } = renderWithProviders(<Terminal />);
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
 
     // Unmount before spawn resolves — cleanup fires pty_kill (no session yet).
     act(() => {
@@ -237,7 +236,7 @@ describe("Terminal", () => {
   });
 
   it("calls FitAddon.fit on initial mount", () => {
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
     const fitInstance = getFitInstance();
     expect(fitInstance.fit).toHaveBeenCalled();
   });
@@ -253,7 +252,7 @@ describe("Terminal", () => {
       };
     }) as unknown as typeof ResizeObserver;
 
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     // After the refactor, onData is registered synchronously (before spawn).
     // Wait for both listen() calls to resolve, which confirms isReadyRef.current
@@ -296,7 +295,7 @@ describe("Terminal", () => {
         }),
     );
 
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     // Give React a tick to mount and set up the observer.
     await new Promise((r) => setTimeout(r, 10));
@@ -316,7 +315,9 @@ describe("Terminal", () => {
   });
 
   it("disposes terminal and disconnects observer on unmount", async () => {
-    const { unmount } = renderWithProviders(<Terminal />);
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
 
     const termInstance = getTermInstance();
     const MockResizeObserver = globalThis.ResizeObserver as unknown as AnyMock;
@@ -343,7 +344,7 @@ describe("Terminal", () => {
     // First invoke call is pty_spawn; all subsequent calls resolve immediately.
     mockInvoke.mockImplementationOnce(() => spawnPromise);
 
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     // onData is now registered synchronously — wait for registration.
     await vi.waitFor(() => {
@@ -393,7 +394,9 @@ describe("Terminal", () => {
 
     mockInvoke.mockImplementationOnce(() => spawnPromise);
 
-    const { unmount } = renderWithProviders(<Terminal />);
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
 
     // Wait for synchronous onData registration.
     await vi.waitFor(() => {
@@ -429,7 +432,7 @@ describe("Terminal", () => {
   it("surfaces pty_write errors via term.writeln", async () => {
     const mockInvoke = invoke as unknown as AnyMock;
 
-    renderWithProviders(<Terminal />);
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
 
     // Wait for the PTY to be ready (both listen() calls resolved).
     const mockListen = listen as unknown as AnyMock;
@@ -471,7 +474,9 @@ describe("Terminal", () => {
 
     mockInvoke.mockImplementationOnce(() => spawnPromise);
 
-    const { unmount } = renderWithProviders(<Terminal />);
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
 
     // Wait for synchronous onData registration.
     await vi.waitFor(() => {

@@ -1,12 +1,5 @@
-import {
-  ActionIcon,
-  Card as MantineCard,
-  CloseButton,
-  Group,
-  Stack,
-  Text,
-  Title,
-} from "@mantine/core";
+import type React from "react";
+import { ActionIcon, Group, Tabs, Text, Title } from "@mantine/core";
 import type { Card } from "../../types/card";
 
 interface NavBarProps {
@@ -30,20 +23,38 @@ export function NavBar({ cards, onAddCard, onRemoveCard }: NavBarProps) {
           No cards yet
         </Text>
       ) : (
-        <Stack gap="xs">
+        // Tabs.List orientation is inherited from the parent <Tabs orientation="vertical">.
+        // No explicit orientation prop is needed here.
+        <Tabs.List>
           {cards.map((card) => (
-            <MantineCard key={card.id}>
-              <Group justify="space-between">
-                <Text>Card {card.id.slice(0, 8)}</Text>
-                {/* TODO: switch to card.title once Card gains a human-readable title field */}
-                <CloseButton
+            <Tabs.Tab key={card.id} value={card.id}>
+              <Group justify="space-between" wrap="nowrap">
+                <Text size="sm">Card {card.id.slice(0, 8)}</Text>
+                {/* component="div" avoids nesting <button> inside <button>
+                    (Tabs.Tab renders as <button>; CloseButton also renders as
+                    <button> by default, which is invalid HTML). Using a div
+                    with role="button" keeps the accessible name and click
+                    behaviour while producing valid HTML. */}
+                <ActionIcon
+                  component="div"
+                  role="button"
                   aria-label={`Remove card ${card.id}`}
-                  onClick={() => onRemoveCard(card.id)}
-                />
+                  variant="subtle"
+                  size="xs"
+                  tabIndex={0}
+                  onClick={(event: React.MouseEvent) => {
+                    // Stop the click from bubbling to the Tabs.Tab, which would
+                    // briefly activate the deleted tab before the card is removed.
+                    event.stopPropagation();
+                    onRemoveCard(card.id);
+                  }}
+                >
+                  ×
+                </ActionIcon>
               </Group>
-            </MantineCard>
+            </Tabs.Tab>
           ))}
-        </Stack>
+        </Tabs.List>
       )}
     </>
   );

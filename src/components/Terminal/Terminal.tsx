@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export function Terminal() {
-  const containerRef = useRef<HTMLDivElement>(null);
+interface TerminalProps {
+  // The caller supplies a stable UUID that identifies this PTY session. The
+  // same sessionId across re-renders means the same shell; a different sessionId
+  // triggers a full unmount/re-spawn via the useEffect dependency array.
+  sessionId: string;
+}
 
-  // One stable session ID per Terminal mount lifetime.
-  const sessionId = useMemo(() => crypto.randomUUID(), []);
+export function Terminal({ sessionId }: TerminalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
