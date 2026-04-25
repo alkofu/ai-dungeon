@@ -7,7 +7,7 @@ ai-dungeon/
 │   ├── App.tsx       # Root component — wrapped in AppLayout
 │   └── components/
 │       ├── Terminal/
-│       │   ├── Terminal.tsx   # xterm.js wrapper — single instance, FitAddon, welcome banner
+│       │   ├── Terminal.tsx   # xterm.js wrapper — live shell via PTY IPC, FitAddon, base64 I/O
 │       │   ├── index.ts       # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
@@ -16,7 +16,8 @@ ai-dungeon/
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point
-│   │   └── lib.rs    # Library crate (command handlers)
+│   │   ├── lib.rs    # Library crate (command handlers)
+│   │   └── pty.rs    # PTY session management (spawn/write/resize/kill commands)
 │   ├── capabilities/ # Tauri permission grants
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
