@@ -13,6 +13,7 @@ vi.mock("@xterm/xterm", () => {
         open: vi.fn(),
         loadAddon: vi.fn(),
         dispose: vi.fn(),
+        onData: vi.fn().mockReturnValue({ dispose: vi.fn() }),
       };
     }),
   };
@@ -21,10 +22,21 @@ vi.mock("@xterm/xterm", () => {
 vi.mock("@xterm/addon-fit", () => {
   return {
     FitAddon: vi.fn().mockImplementation(function () {
-      return { fit: vi.fn() };
+      return {
+        fit: vi.fn(),
+        proposeDimensions: vi.fn().mockReturnValue({ cols: 80, rows: 24 }),
+      };
     }),
   };
 });
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockImplementation(() => Promise.resolve(vi.fn())),
+}));
 
 describe("App", () => {
   it("renders the AppShell with terminal content", () => {
