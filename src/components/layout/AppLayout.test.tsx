@@ -148,8 +148,9 @@ describe("AppLayout", () => {
             onRemoveCard={vi.fn()}
             activeId="A"
             onActiveIdChange={vi.fn()}
-            contexts={{}}
-            onContextChange={vi.fn()}
+            sessionContext={{}}
+            onSessionContextChange={vi.fn()}
+            onSessionContextPatch={vi.fn()}
           />
         </React.StrictMode>,
       );
@@ -193,8 +194,9 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId="card-1"
         onActiveIdChange={vi.fn()}
-        contexts={{}}
-        onContextChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
+        onSessionContextPatch={vi.fn()}
       />,
     );
 
@@ -211,8 +213,9 @@ describe("AppLayout", () => {
           onRemoveCard={vi.fn()}
           activeId="card-1"
           onActiveIdChange={vi.fn()}
-          contexts={{}}
-          onContextChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          onSessionContextPatch={vi.fn()}
         />,
       );
       await Promise.resolve();
