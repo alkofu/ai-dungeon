@@ -4,17 +4,23 @@ import { act } from "@testing-library/react";
 import { renderWithProviders } from "./test-utils/render";
 import { App, appReducer } from "./App";
 import type { AppState } from "./App";
-import type { SessionMeta } from "./types/session";
+import type { SessionContext } from "./types/session";
 import { invoke } from "@tauri-apps/api/core";
 
-// Capture the latest onSessionMeta prop passed to the Terminal mock so
+// Capture the latest callbacks passed to the Terminal mock so
 // integration tests can fire OSC context changes through the full plumbing.
-let capturedOnSessionMeta: ((meta: SessionMeta) => void) | undefined;
+let capturedOnSessionContextChange: ((ctx: SessionContext) => void) | undefined;
+let capturedOnSessionContextPatch: ((patch: Partial<SessionContext>) => void) | undefined;
 
 vi.mock("./components/Terminal/Terminal", () => ({
   Terminal: vi.fn(
-    (props: { sessionId?: string; onSessionMeta?: (meta: SessionMeta) => void }) => {
-      capturedOnSessionMeta = props.onSessionMeta;
+    (props: {
+      sessionId?: string;
+      onSessionContextChange?: (ctx: SessionContext) => void;
+      onSessionContextPatch?: (patch: Partial<SessionContext>) => void;
+    }) => {
+      capturedOnSessionContextChange = props.onSessionContextChange;
+      capturedOnSessionContextPatch = props.onSessionContextPatch;
       // Render the sentinel div so existing tests that query terminal-root continue to work.
       return <div data-testid="terminal-root" />;
     },
@@ -67,7 +73,8 @@ type AnyMock = ReturnType<typeof vi.fn>;
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedOnSessionMeta = undefined;
+    capturedOnSessionContextChange = undefined;
+    capturedOnSessionContextPatch = undefined;
     (invoke as unknown as AnyMock).mockResolvedValue(undefined);
 
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
@@ -270,15 +277,15 @@ describe("App", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("SessionCard row-2 updates when the Terminal's onSessionMeta callback fires", async () => {
+  it("SessionCard row-2 updates when the Terminal's onSessionContextChange callback fires", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
 
-    // Fire the onSessionMeta callback captured from the Terminal mock.
+    // Fire the onSessionContextChange callback captured from the Terminal mock.
     await act(async () => {
-      capturedOnSessionMeta?.({
+      capturedOnSessionContextChange?.({
         sessionTs: "20260425-120000",
         slug: "backend-service",
         workingDirectory: "/home/user/project/backend-service",
@@ -290,44 +297,151 @@ describe("App", () => {
     // SessionCard row-2 should now show the slug.
     expect(screen.getByText("backend-service")).toBeInTheDocument();
   });
+
+  it("SessionCard row-2 updates incrementally when onSessionContextPatch fires after a full-context initialisation", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    // Initialise with a full SessionContext.
+    await act(async () => {
+      capturedOnSessionContextChange?.({
+        sessionTs: "20260425-120000",
+        slug: "incremental-test",
+        workingDirectory: "/initial/path",
+        branch: "initial-branch",
+        repo: { owner: "acme", name: "widgets" },
+      });
+    });
+
+    // Confirm initial render: the last two segments of "/initial/path" is "initial/path".
+    expect(screen.getByText("initial/path")).toBeInTheDocument();
+
+    // Patch the working directory only.
+    await act(async () => {
+      capturedOnSessionContextPatch?.({ workingDirectory: "/updated/deep/path" });
+    });
+
+    // The tail should now show "deep/path".
+    expect(screen.getByText("deep/path")).toBeInTheDocument();
+    // branch must still be present (merge, not replace).
+    expect(screen.getByText("initial-branch")).toBeInTheDocument();
+  });
+
+  it("OSC 6800 → OSC 7 → OSC 6800 fully replaces the patched record", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    // First full OSC 6800.
+    await act(async () => {
+      capturedOnSessionContextChange?.({
+        sessionTs: "20260425-120000",
+        slug: "replace-test",
+        workingDirectory: "/a",
+        branch: "a-branch",
+        repo: { owner: "acme", name: "widgets" },
+      });
+    });
+
+    // Patch working directory via OSC 7.
+    await act(async () => {
+      capturedOnSessionContextPatch?.({ workingDirectory: "/patched" });
+    });
+    expect(screen.getByText("patched")).toBeInTheDocument();
+    expect(screen.getByText("a-branch")).toBeInTheDocument();
+
+    // Second full OSC 6800 with completely different context.
+    await act(async () => {
+      capturedOnSessionContextChange?.({
+        sessionTs: "20260425-130000",
+        slug: "replace-test",
+        workingDirectory: "/b",
+        branch: "b-branch",
+        repo: { owner: "acme", name: "widgets" },
+      });
+    });
+
+    // Full replacement: working directory tail should be "b", branch "b-branch".
+    expect(screen.getByText("b")).toBeInTheDocument();
+    expect(screen.getByText("b-branch")).toBeInTheDocument();
+    // "a-branch" must be gone.
+    expect(screen.queryByText("a-branch")).toBeNull();
+  });
+
+  it("SessionCard renders without crashing after empty OSC 7337 clears branch and repo", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    const meta: SessionContext = {
+      sessionTs: "20260425-120000",
+      slug: "smoke",
+      workingDirectory: "/some/path",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
+    };
+
+    // Defensive pre-condition: slug visible before the patch.
+    await act(async () => {
+      capturedOnSessionContextChange?.(meta);
+    });
+    expect(screen.getByText(meta.slug)).toBeInTheDocument();
+    expect(screen.getByText("widgets")).toBeInTheDocument();
+
+    // Clear branch and repo via empty OSC 7337.
+    await act(async () => {
+      capturedOnSessionContextPatch?.({ branch: undefined, repo: undefined });
+    });
+
+    // Crash-free assertions.
+    expect(screen.getByText(meta.slug)).toBeInTheDocument();
+    expect(screen.queryByText("acme/widgets")).toBeNull();
+    expect(screen.queryByText("widgets")).toBeNull();
+    // Re-assert slug is still in the DOM.
+    expect(screen.getByText(meta.slug)).toBeInTheDocument();
+  });
 });
 
 describe("appReducer", () => {
   it("activate ignores null while cards exist", () => {
     const card = { id: "test-uuid-1" };
-    const state: AppState = { cards: [card], activeId: "test-uuid-1", sessionMeta: {} };
+    const state: AppState = { cards: [card], activeId: "test-uuid-1", sessionContext: {} };
     expect(appReducer(state, { type: "activate", id: null })).toBe(state); // referential equality
   });
 
   it("activate accepts null when no cards exist", () => {
-    const state: AppState = { cards: [], activeId: null, sessionMeta: {} };
+    const state: AppState = { cards: [], activeId: null, sessionContext: {} };
     const result = appReducer(state, { type: "activate", id: null });
-    expect(result).toEqual({ cards: [], activeId: null, sessionMeta: {} });
+    expect(result).toEqual({ cards: [], activeId: null, sessionContext: {} });
   });
 
-  it("setSessionMeta stores meta keyed by card id", () => {
+  it("setSessionContext stores ctx keyed by card id", () => {
     const card = { id: "card-1" };
-    const state: AppState = { cards: [card], activeId: "card-1", sessionMeta: {} };
-    const meta = {
+    const state: AppState = { cards: [card], activeId: "card-1", sessionContext: {} };
+    const ctx = {
       sessionTs: "20260425-120000",
       slug: "test",
       workingDirectory: "/tmp",
       branch: "main",
       repo: { owner: "acme", name: "widgets" },
     };
-    const result = appReducer(state, { type: "setSessionMeta", id: "card-1", meta });
-    expect(result.sessionMeta["card-1"]).toEqual(meta);
+    const result = appReducer(state, { type: "setSessionContext", id: "card-1", ctx });
+    expect(result.sessionContext["card-1"]).toEqual(ctx);
   });
 
-  it("setSessionMeta: overwrites existing metadata when same card emits OSC again", () => {
-    const firstMeta: SessionMeta = {
+  it("setSessionContext: overwrites existing context when same card emits OSC again", () => {
+    const firstCtx: SessionContext = {
       sessionTs: "20260401-120000",
       slug: "first-slug",
       workingDirectory: "/tmp",
       branch: "main",
       repo: { owner: "acme", name: "widgets" },
     };
-    const secondMeta: SessionMeta = {
+    const secondCtx: SessionContext = {
       sessionTs: "20260401-130000",
       slug: "second-slug",
       workingDirectory: "/tmp",
@@ -335,35 +449,35 @@ describe("appReducer", () => {
       repo: { owner: "acme", name: "widgets" },
     };
     const stateAfterFirst = appReducer(
-      { cards: [{ id: "card-1" }], activeId: null, sessionMeta: {} },
-      { type: "setSessionMeta", id: "card-1", meta: firstMeta },
+      { cards: [{ id: "card-1" }], activeId: null, sessionContext: {} },
+      { type: "setSessionContext", id: "card-1", ctx: firstCtx },
     );
     const stateAfterSecond = appReducer(stateAfterFirst, {
-      type: "setSessionMeta",
+      type: "setSessionContext",
       id: "card-1",
-      meta: secondMeta,
+      ctx: secondCtx,
     });
-    expect(stateAfterSecond.sessionMeta["card-1"]).toEqual(secondMeta);
+    expect(stateAfterSecond.sessionContext["card-1"]).toEqual(secondCtx);
     // second value fully replaces first — no field bleeding
-    expect(stateAfterSecond.sessionMeta["card-1"].sessionTs).toBe("20260401-130000");
+    expect(stateAfterSecond.sessionContext["card-1"].sessionTs).toBe("20260401-130000");
   });
 
-  it("setSessionMeta is a no-op if card id is not in state.cards", () => {
-    const state: AppState = { cards: [], activeId: null, sessionMeta: {} };
-    const meta = {
+  it("setSessionContext is a no-op if card id is not in state.cards", () => {
+    const state: AppState = { cards: [], activeId: null, sessionContext: {} };
+    const ctx = {
       sessionTs: "20260425-120000",
       slug: "test",
       workingDirectory: "/tmp",
       branch: "main",
       repo: { owner: "acme", name: "widgets" },
     };
-    const result = appReducer(state, { type: "setSessionMeta", id: "ghost-id", meta });
+    const result = appReducer(state, { type: "setSessionContext", id: "ghost-id", ctx });
     expect(result).toBe(state); // referential equality — no-op
   });
 
-  it("remove cleans up sessionMeta for the removed card", () => {
+  it("remove cleans up sessionContext for the removed card", () => {
     const card = { id: "card-1" };
-    const meta = {
+    const ctx = {
       sessionTs: "20260425-120000",
       slug: "test",
       workingDirectory: "/tmp",
@@ -373,9 +487,96 @@ describe("appReducer", () => {
     const state: AppState = {
       cards: [card],
       activeId: "card-1",
-      sessionMeta: { "card-1": meta },
+      sessionContext: { "card-1": ctx },
     };
     const result = appReducer(state, { type: "remove", id: "card-1" });
-    expect(result.sessionMeta).not.toHaveProperty("card-1");
+    expect(result.sessionContext).not.toHaveProperty("card-1");
+  });
+
+  it("patchSessionContext merges patch into existing record", () => {
+    const fullCtx: SessionContext = {
+      sessionTs: "20260425-120000",
+      slug: "test",
+      workingDirectory: "/old",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
+    };
+    const state: AppState = {
+      cards: [{ id: "card-1" }],
+      activeId: "card-1",
+      sessionContext: { "card-1": fullCtx },
+    };
+    const result = appReducer(state, {
+      type: "patchSessionContext",
+      id: "card-1",
+      patch: { workingDirectory: "/new" },
+    });
+    expect(result.sessionContext["card-1"].workingDirectory).toBe("/new");
+    // All other fields unchanged.
+    expect(result.sessionContext["card-1"].slug).toBe("test");
+    expect(result.sessionContext["card-1"].branch).toBe("main");
+    expect(result.sessionContext["card-1"].repo).toEqual({ owner: "acme", name: "widgets" });
+  });
+
+  it("patchSessionContext is a no-op if no record exists for the card id", () => {
+    // DEV-env precondition: the no-op DEV branch uses import.meta.env.DEV.
+    expect(import.meta.env.DEV).toBe(true);
+
+    const consoleSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const state: AppState = {
+      cards: [{ id: "card-1" }],
+      activeId: "card-1",
+      sessionContext: {},
+    };
+    const result = appReducer(state, {
+      type: "patchSessionContext",
+      id: "card-1",
+      patch: { workingDirectory: "/new" },
+    });
+    expect(result).toBe(state); // referential equality — no-op
+
+    // DEV-only console.debug must have been called with the expected prefix.
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[osc-7|7337]"),
+      expect.anything(),
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("patchSessionContext is a no-op if the card id is not in state.cards", () => {
+    const state: AppState = { cards: [], activeId: null, sessionContext: {} };
+    const result = appReducer(state, {
+      type: "patchSessionContext",
+      id: "ghost-id",
+      patch: { workingDirectory: "/new" },
+    });
+    expect(result).toBe(state); // referential equality — no-op
+  });
+
+  it("patchSessionContext does not mutate the original record", () => {
+    const originalCtx: SessionContext = {
+      sessionTs: "20260425-120000",
+      slug: "test",
+      workingDirectory: "/old",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
+    };
+    const state: AppState = {
+      cards: [{ id: "card-1" }],
+      activeId: "card-1",
+      sessionContext: { "card-1": originalCtx },
+    };
+    const result = appReducer(state, {
+      type: "patchSessionContext",
+      id: "card-1",
+      patch: { workingDirectory: "/new" },
+    });
+    // The new record must be a different object reference.
+    expect(result.sessionContext["card-1"]).not.toBe(originalCtx);
+    // The original must be unmodified.
+    expect(originalCtx.workingDirectory).toBe("/old");
   });
 });

@@ -1,14 +1,14 @@
 import { useCallback, useReducer } from "react";
 import { AppLayout } from "./components/layout";
 import type { Card } from "./types/card";
-import type { SessionMeta } from "./types/session";
+import type { SessionContext } from "./types/session";
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
 export interface AppState {
   cards: Card[];
   activeId: string | null;
-  sessionMeta: Record<string, SessionMeta>;
+  sessionContext: Record<string, SessionContext>;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -17,7 +17,8 @@ type AppAction =
   | { type: "add" }
   | { type: "remove"; id: string }
   | { type: "activate"; id: string | null }
-  | { type: "setSessionMeta"; id: string; meta: SessionMeta };
+  | { type: "setSessionContext"; id: string; ctx: SessionContext }
+  | { type: "patchSessionContext"; id: string; patch: Partial<SessionContext> };
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         cards: [...state.cards, newCard],
         // Always activate the newly added card — conventional UX for terminal apps.
         activeId: newCard.id,
-        sessionMeta: state.sessionMeta,
+        sessionContext: state.sessionContext,
       };
     }
     case "remove": {
@@ -52,12 +53,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         }
       }
 
-      // Remove the card's session metadata to avoid leaking memory across long sessions.
+      // Remove the card's session context to avoid leaking memory across long sessions.
       // Use object destructuring rather than `delete` to keep the reducer pure.
-      const { [action.id]: _removed, ...remainingMeta } = state.sessionMeta;
+      const { [action.id]: _removed, ...remainingContext } = state.sessionContext;
       void _removed;
 
-      return { cards: remaining, activeId: nextActiveId, sessionMeta: remainingMeta };
+      return { cards: remaining, activeId: nextActiveId, sessionContext: remainingContext };
     }
     case "activate": {
       if (action.id === null && state.cards.length > 0) {
@@ -65,13 +66,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
       return { ...state, activeId: action.id };
     }
-    case "setSessionMeta": {
+    case "setSessionContext": {
       // No-op if the card is not in state.cards — guards against a race where
       // the OSC handler fires after the card is removed (before dispose).
       if (!state.cards.some((c) => c.id === action.id)) return state;
       return {
         ...state,
-        sessionMeta: { ...state.sessionMeta, [action.id]: action.meta },
+        sessionContext: { ...state.sessionContext, [action.id]: action.ctx },
+      };
+    }
+    case "patchSessionContext": {
+      // No-op if the card is not in state.cards — parity with setSessionContext.
+      if (!state.cards.some((c) => c.id === action.id)) return state;
+      // No-op if no record exists to patch — OSC 6800 must initialise the record first.
+      // OSC 7 / OSC 7337 patches against a missing record are silently dropped.
+      if (state.sessionContext[action.id] === undefined) {
+        if (import.meta.env.DEV) {
+          console.debug("[osc-7|7337] patch dropped — no SessionContext record for card", {
+            id: action.id,
+          });
+        }
+        return state;
+      }
+      return {
+        ...state,
+        sessionContext: {
+          ...state.sessionContext,
+          [action.id]: { ...state.sessionContext[action.id], ...action.patch },
+        },
       };
     }
     default:
@@ -79,7 +101,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-const initialState: AppState = { cards: [], activeId: null, sessionMeta: {} };
+const initialState: AppState = { cards: [], activeId: null, sessionContext: {} };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -100,8 +122,12 @@ export function App() {
     dispatch({ type: "activate", id: value });
   }, []);
 
-  const setSessionMeta = useCallback((id: string, meta: SessionMeta) => {
-    dispatch({ type: "setSessionMeta", id, meta });
+  const setSessionContext = useCallback((id: string, ctx: SessionContext) => {
+    dispatch({ type: "setSessionContext", id, ctx });
+  }, []);
+
+  const setSessionContextPatch = useCallback((id: string, patch: Partial<SessionContext>) => {
+    dispatch({ type: "patchSessionContext", id, patch });
   }, []);
 
   return (
@@ -111,8 +137,9 @@ export function App() {
       onActiveIdChange={setActiveId}
       onAddCard={addCard}
       onRemoveCard={removeCard}
-      sessionMeta={state.sessionMeta}
-      onSessionMeta={setSessionMeta}
+      sessionContext={state.sessionContext}
+      onSessionContextChange={setSessionContext}
+      onSessionContextPatch={setSessionContextPatch}
     />
   );
 }

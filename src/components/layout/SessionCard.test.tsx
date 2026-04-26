@@ -4,7 +4,7 @@ import { vi } from "vitest";
 import { Tabs } from "@mantine/core";
 import { renderWithProviders } from "../../test-utils/render";
 import { SessionCard } from "./SessionCard";
-import { getMockSessionMeta, SESSION_META_FIXTURES } from "./sessionMeta.mock";
+import { getMockSessionContext, SESSION_CONTEXT_FIXTURES } from "./sessionContext.mock";
 
 // Cards 1–5 are wrapped in Tabs context matching production rendering.
 function renderInTabs(cardId: string, onRemove = vi.fn()) {
@@ -40,7 +40,7 @@ describe("SessionCard", () => {
 
   it("1. renders the slug from the mock fixture for the given cardId", () => {
     renderInTabs(CARD_ID_F0);
-    expect(screen.getByText(SESSION_META_FIXTURES[0].slug)).toBeInTheDocument();
+    expect(screen.getByText(SESSION_CONTEXT_FIXTURES[0].slug)).toBeInTheDocument();
   });
 
   it("2. renders close button with correct aria-label and calls onRemove when clicked", async () => {
@@ -87,12 +87,12 @@ describe("SessionCard", () => {
     const user = userEvent.setup();
     renderInTabs(CARD_ID_F0);
 
-    const meta = SESSION_META_FIXTURES[0];
-    const trigger = screen.getByText(meta.repo.name);
+    const meta = SESSION_CONTEXT_FIXTURES[0];
+    const trigger = screen.getByText(meta.repo!.name);
     await user.hover(trigger);
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent(`${meta.repo.owner}/${meta.repo.name}`);
+    expect(tooltip).toHaveTextContent(`${meta.repo!.owner}/${meta.repo!.name}`);
   });
 
   it("7. tooltip on working-directory tail shows the full path", async () => {
@@ -106,14 +106,14 @@ describe("SessionCard", () => {
     await user.hover(trigger);
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent(SESSION_META_FIXTURES[1].workingDirectory);
+    expect(tooltip).toHaveTextContent(SESSION_CONTEXT_FIXTURES[1].workingDirectory);
   });
 
   it("8. working-directory visible text is last 1-2 segments", () => {
     // Fixture 1: "/home/user/work/backend-service/src/handlers" → "src/handlers"
     renderInTabs(CARD_ID_F1);
     expect(screen.getByText("src/handlers")).toBeInTheDocument();
-    expect(screen.queryByText(SESSION_META_FIXTURES[1].workingDirectory)).toBeNull();
+    expect(screen.queryByText(SESSION_CONTEXT_FIXTURES[1].workingDirectory)).toBeNull();
   });
 
   it("9a. PR badge shows 'PR —' when prNumber is undefined", () => {
@@ -182,23 +182,23 @@ describe("SessionCard", () => {
 
   it("mock module is deterministic: same cardId returns deeply equal objects", () => {
     const id = "test-determinism-check";
-    const a = getMockSessionMeta(id);
-    const b = getMockSessionMeta(id);
+    const a = getMockSessionContext(id);
+    const b = getMockSessionContext(id);
     expect(a).toEqual(b);
   });
 
-  // ── sessionMeta prop tests ────────────────────────────────────────────────
+  // ── sessionContext prop tests ──────────────────────────────────────────────
 
-  it("fallback: when sessionMeta prop is omitted, renders slug/repo/branch from mock fixture", () => {
+  it("fallback: when sessionContext prop is omitted, renders slug/repo/branch from mock fixture", () => {
     renderInTabs(CARD_ID_F0);
-    const fixture = SESSION_META_FIXTURES[0];
+    const fixture = SESSION_CONTEXT_FIXTURES[0];
     expect(screen.getByText(fixture.slug)).toBeInTheDocument();
-    expect(screen.getByText(fixture.repo.name)).toBeInTheDocument();
-    expect(screen.getByText(fixture.branch)).toBeInTheDocument();
+    expect(screen.getByText(fixture.repo!.name)).toBeInTheDocument();
+    expect(screen.getByText(fixture.branch!)).toBeInTheDocument();
   });
 
-  it("live: when sessionMeta prop is provided, renders slug/repo/branch from prop (not mock)", () => {
-    const liveMeta = {
+  it("live: when sessionContext prop is provided, renders slug/repo/branch from prop (not mock)", () => {
+    const liveContext = {
       sessionTs: "20260425-120000",
       slug: "live-session",
       workingDirectory: "/live/path/to/project",
@@ -207,21 +207,51 @@ describe("SessionCard", () => {
       prNumber: 99,
       issueNumber: 7,
     };
-    renderWithProviders(
+    const { unmount: unmountFirst } = renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value={CARD_ID_F0}>
-          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionMeta={liveMeta} />
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionContext={liveContext} />
         </Tabs.Tab>
       </Tabs>,
     );
 
-    // Live metadata must be shown.
+    // Live context must be shown.
     expect(screen.getByText("live-session")).toBeInTheDocument();
     expect(screen.getByText("live-repo")).toBeInTheDocument();
     expect(screen.getByText("feat/live-branch")).toBeInTheDocument();
 
     // Mock fixture data must NOT appear.
-    const fixture = SESSION_META_FIXTURES[0];
+    const fixture = SESSION_CONTEXT_FIXTURES[0];
     expect(screen.queryByText(fixture.slug)).toBeNull();
+
+    unmountFirst();
+
+    // (a) Repo + branch absent — does not throw, slug still visible.
+    const clearedContext = {
+      sessionTs: "20260425-120000",
+      slug: "live-session",
+      workingDirectory: "/live/path/to/project",
+      repo: undefined,
+      branch: undefined,
+    };
+    const { unmount: unmountCleared } = renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionContext={clearedContext} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("live-session")).toBeInTheDocument();
+    unmountCleared();
+
+    // (b) Existing-fixture behaviour preserved — repo name visible with non-cleared fixture.
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionContext={liveContext} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText(liveContext.repo!.name)).toBeInTheDocument();
   });
 });

@@ -3,13 +3,12 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { parseSessionMetaPayload } from "../../types/sessionPayload";
-import type { SessionMeta } from "../../types/session";
-
-export interface SessionContext {
-  cwd: string | null;
-  git: { repo: string; branch: string } | null;
-}
+import {
+  parseSessionContextPayload,
+  parseOsc7Payload,
+  parseOsc7337Payload,
+} from "../../types/sessionPayload";
+import type { SessionContext } from "../../types/session";
 
 interface TerminalProps {
   // The caller supplies a stable UUID that identifies this PTY session. The
@@ -17,10 +16,14 @@ interface TerminalProps {
   // triggers a full unmount/re-spawn via the useEffect dependency array.
   sessionId: string;
   // Called whenever an OSC 6800 payload is received and successfully parsed.
+  // Fires with a fully-formed SessionContext (full replacement).
   // Captured via a ref so the OSC handler always uses the latest version without
   // needing to be in the useEffect dependency array (which would restart the PTY
   // session on every re-render of the parent).
-  onSessionMeta?: (meta: SessionMeta) => void;
+  onSessionContextChange?: (ctx: SessionContext) => void;
+  // Called whenever an OSC 7 or OSC 7337 payload is received and successfully parsed.
+  // Fires with a partial patch that is merged into the existing SessionContext record.
+  onSessionContextPatch?: (patch: Partial<SessionContext>) => void;
 }
 
 // ── Per-sid spawn-chain (Ruinor F-1 resolution) ───────────────────────────────
@@ -56,14 +59,21 @@ export function _clearSpawnChainForTesting(): void {
   spawnChain.clear();
 }
 
-export function Terminal({ sessionId, onSessionMeta }: TerminalProps) {
+export function Terminal({
+  sessionId,
+  onSessionContextChange,
+  onSessionContextPatch,
+}: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Keep a ref to the latest onSessionMeta callback so the OSC handler always
-  // calls the current version without adding it to the useEffect dependency
-  // array (which would cause the effect — and therefore the PTY session — to
-  // restart every time the parent re-renders).
-  const onSessionMetaRef = useRef(onSessionMeta);
-  onSessionMetaRef.current = onSessionMeta;
+
+  // Keep refs to the latest callbacks so the OSC handlers always call the current
+  // version without adding them to the useEffect dependency array (which would
+  // cause the effect — and therefore the PTY session — to restart every time the
+  // parent re-renders). Assignments run on every render (component-top scope).
+  const onSessionContextChangeRef = useRef(onSessionContextChange);
+  onSessionContextChangeRef.current = onSessionContextChange;
+  const onSessionContextPatchRef = useRef(onSessionContextPatch);
+  onSessionContextPatchRef.current = onSessionContextPatch;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -82,8 +92,10 @@ export function Terminal({ sessionId, onSessionMeta }: TerminalProps) {
     // Collect the onData disposable for cleanup.
     let onDataDisposable: { dispose: () => void } | undefined;
 
-    // Collect the OSC 6800 handler disposable for cleanup.
+    // Collect the OSC handler disposables for cleanup.
     let oscDisposable: { dispose: () => void } | undefined;
+    let osc7Handler: { dispose: () => void } | undefined;
+    let osc7337Handler: { dispose: () => void } | undefined;
 
     // Buffer for keystrokes that arrive before the PTY is ready. Each entry is
     // a discrete xterm onData string and is encoded + sent independently to
@@ -98,16 +110,36 @@ export function Terminal({ sessionId, onSessionMeta }: TerminalProps) {
 
     // ── OSC 6800 handler ──────────────────────────────────────────────────────
     // Intercepts OSC 6800 sequences emitted by the TPK toolkit to surface
-    // session metadata in the per-tab UI. The handler returns true so xterm.js
+    // session context in the per-tab UI. The handler returns true so xterm.js
     // does not chain the sequence to its default handler (which would print or
     // ignore it). The dispatch is wrapped in queueMicrotask to guarantee it
     // lands outside the current synchronous stack (term.write() fires OSC
     // handlers synchronously, which would violate React's render rules).
     oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
-      const meta = parseSessionMetaPayload(data);
-      if (meta) {
-        queueMicrotask(() => onSessionMetaRef.current?.(meta));
+      const ctx = parseSessionContextPayload(data);
+      if (ctx) {
+        queueMicrotask(() => onSessionContextChangeRef.current?.(ctx));
       }
+      return true;
+    });
+
+    // ── OSC 7 handler ─────────────────────────────────────────────────────────
+    // Intercepts OSC 7 sequences (file:// URI carrying the shell's CWD).
+    // Delegates all parsing/validation to parseOsc7Payload — handler body is
+    // a thin call-site only.
+    osc7Handler = term.parser.registerOscHandler(7, (data): boolean => {
+      const result = parseOsc7Payload(data);
+      if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+      return true;
+    });
+
+    // ── OSC 7337 handler ──────────────────────────────────────────────────────
+    // Intercepts OSC 7337 sequences (git context: bare repo name + branch).
+    // Delegates all parsing/validation to parseOsc7337Payload — handler body is
+    // a thin call-site only.
+    osc7337Handler = term.parser.registerOscHandler(7337, (data): boolean => {
+      const result = parseOsc7337Payload(data);
+      if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
       return true;
     });
 
@@ -286,7 +318,9 @@ export function Terminal({ sessionId, onSessionMeta }: TerminalProps) {
       // this unmounted instance.
       pendingWrites.length = 0;
       observer.disconnect();
-      oscDisposable?.dispose();
+      oscDisposable?.dispose(); // OSC 6800
+      osc7Handler?.dispose(); // OSC 7
+      osc7337Handler?.dispose(); // OSC 7337
       onDataDisposable?.dispose();
       unlistenOutput?.();
       unlistenExit?.();

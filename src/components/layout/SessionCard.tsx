@@ -1,13 +1,13 @@
 import type React from "react";
 import { ActionIcon, Badge, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconCircleDot, IconGitPullRequest } from "@tabler/icons-react";
-import type { SessionMeta } from "../../types/session";
-import { getMockSessionMeta } from "./sessionMeta.mock";
+import type { SessionContext } from "../../types/session";
+import { getMockSessionContext } from "./sessionContext.mock";
 
 interface SessionCardProps {
   cardId: string;
   onRemove: (id: string) => void;
-  sessionMeta?: SessionMeta;
+  sessionContext?: SessionContext;
 }
 
 /**
@@ -23,8 +23,8 @@ function lastSegments(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-export function SessionCard({ cardId, onRemove, sessionMeta }: SessionCardProps) {
-  const meta = sessionMeta ?? getMockSessionMeta(cardId);
+export function SessionCard({ cardId, onRemove, sessionContext }: SessionCardProps) {
+  const meta = sessionContext ?? getMockSessionContext(cardId);
 
   return (
     <Stack gap="xs">
@@ -60,22 +60,32 @@ export function SessionCard({ cardId, onRemove, sessionMeta }: SessionCardProps)
         </ActionIcon>
       </Group>
 
-      {/* Row 2: repo : branch • path-tail */}
+      {/* Row 2: [repo : branch •] path-tail
+          repo and branch are optional — cleared by empty OSC 7337.
+          When absent, their segments (including the : and • separators) are omitted. */}
       <Group gap="xs" wrap="nowrap">
-        <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
-          <Text size="xs" c="dimmed" truncate>
-            {meta.repo.name}
-          </Text>
-        </Tooltip>
-        <Text size="xs" c="dimmed">
-          :
-        </Text>
-        <Text size="xs" c="dimmed" truncate>
-          {meta.branch}
-        </Text>
-        <Text size="xs" c="dimmed">
-          •
-        </Text>
+        {meta.repo != null && (
+          <>
+            <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
+              <Text size="xs" c="dimmed" truncate>
+                {meta.repo.name}
+              </Text>
+            </Tooltip>
+            <Text size="xs" c="dimmed">
+              :
+            </Text>
+          </>
+        )}
+        {meta.branch != null && (
+          <>
+            <Text size="xs" c="dimmed" truncate>
+              {meta.branch}
+            </Text>
+            <Text size="xs" c="dimmed">
+              •
+            </Text>
+          </>
+        )}
         <Tooltip label={meta.workingDirectory} withinPortal={false}>
           <Text size="xs" c="dimmed" truncate>
             {lastSegments(meta.workingDirectory)}

@@ -1,6 +1,6 @@
-import type { SessionMeta } from "../../types/session";
+import type { SessionContext } from "../../types/session";
 
-export const SESSION_META_FIXTURES: SessionMeta[] = [
+export const SESSION_CONTEXT_FIXTURES: SessionContext[] = [
   {
     sessionTs: "20260425-120000",
     slug: "refactor-auth-flow",
@@ -36,15 +36,15 @@ export const SESSION_META_FIXTURES: SessionMeta[] = [
 ];
 
 /**
- * Returns a deterministic SessionMeta fixture for the given cardId.
+ * Returns a deterministic SessionContext fixture for the given cardId.
  * Uses a char-code sum mod fixtures.length mapping — note this introduces a
  * cosmetic bias toward lower-indexed fixtures for sequential single-char IDs,
  * which is acceptable for mock data.
  */
-export function getMockSessionMeta(cardId: string): SessionMeta {
+export function getMockSessionContext(cardId: string): SessionContext {
   let sum = 0;
   for (let i = 0; i < cardId.length; i++) {
     sum += cardId.charCodeAt(i);
   }
-  return SESSION_META_FIXTURES[sum % SESSION_META_FIXTURES.length];
+  return SESSION_CONTEXT_FIXTURES[sum % SESSION_CONTEXT_FIXTURES.length];
 }
