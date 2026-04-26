@@ -1,6 +1,39 @@
+/*
+ * Font and locale prerequisites
+ * ──────────────────────────────────────────────────────────────────────────────
+ * This component depends on three guarantees that span multiple files:
+ *
+ * 1. FONT PRELOAD — `webFontsAddon.loadFonts(['MesloLGS NF'])` is awaited before
+ *    `term.open()` so xterm measures glyph widths against MesloLGS NF, not the
+ *    fallback monospace. Inverting this order causes permanent alignment damage
+ *    that persists for the lifetime of the terminal instance.
+ *
+ *    Precondition: `src/styles/fonts.css` MUST be imported at module scope from
+ *    `src/main.tsx`. The @xterm/addon-web-fonts API: loadFonts(string[]) only
+ *    resolves FontFace[] for @font-face rules already registered in
+ *    document.fonts. The module-scope import is what populates document.fonts
+ *    before any component code runs (Vite resolves CSS imports synchronously at
+ *    module evaluation). Without this import, the addon rejects with the string
+ *    error `'font family "MesloLGS NF" not registered in document.fonts'`.
+ *
+ *    Alternative: pass FontFace constructor objects directly to loadFonts() to
+ *    bypass the document.fonts precondition entirely. This is documented here
+ *    as an escape hatch if the import-order guarantee is ever broken.
+ *
+ * 2. GEOMETRY — `letterSpacing: 0`, `lineHeight: 1`, no `customGlyphs`. Both
+ *    values are load-bearing for Nerd Font alignment. `customGlyphs` only affects
+ *    block/box-drawing characters and has no effect under the DOM renderer; do
+ *    NOT enable it. These are pinned in the XTerm constructor below.
+ *
+ * 3. UTF-8 LOCALE — `src-tauri/src/pty.rs` exports `LC_ALL` set to a UTF-8
+ *    locale on every Unix spawn (see `resolve_pty_utf8_locale`). Without this,
+ *    Powerlevel10k prompt rendering and many non-ASCII glyphs degrade. The Rust
+ *    unit tests in `pty.rs::tests` enforce the resolution priority.
+ */
 import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebFontsAddon } from "@xterm/addon-web-fonts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -82,7 +115,7 @@ export function Terminal({
     // callback and onData handler know whether the PTY is ready.
     const isReadyRef = { current: false };
 
-    // Track whether cleanup has run so the async IIFE can bail early.
+    // Track whether cleanup has run so the async IIFEs can bail early.
     let cancelled = false;
 
     // Collect IPC unlisten functions to call during cleanup.
@@ -102,10 +135,29 @@ export function Terminal({
     // preserve per-keystroke handling semantics.
     const pendingWrites: string[] = [];
 
-    // ── Terminal & FitAddon ───────────────────────────────────────────────────
-    const term = new XTerm();
+    // ── Terminal, FitAddon, and WebFontsAddon ─────────────────────────────────
+    //
+    // fontFamily: '"MesloLGS NF", monospace' — Powerlevel10k-recommended Nerd
+    // Font. Falls back to system monospace if vendored TTFs are unavailable.
+    // fontSize: 13, lineHeight: 1, letterSpacing: 0 — pinned to the values
+    // documented by xterm.js for correct Nerd Font / powerline glyph alignment.
+    // DO NOT change lineHeight or letterSpacing without re-testing all powerline
+    // glyphs. customGlyphs is intentionally NOT set (default false) — it only
+    // affects block/box-drawing characters and has no effect under the DOM
+    // renderer; it does not fix powerline glyphs.
+    // minimumContrastRatio: 1 — disables xterm's automatic colour adjustment,
+    // which can shift theme colours in ways that conflict with p10k palettes.
+    const term = new XTerm({
+      fontFamily: '"MesloLGS NF", monospace',
+      fontSize: 13,
+      lineHeight: 1,
+      letterSpacing: 0,
+      minimumContrastRatio: 1,
+    });
     const fitAddon = new FitAddon();
+    const webFontsAddon = new WebFontsAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(webFontsAddon);
 
     // Allow the global tab-switching hotkeys to escape xterm.
     // Returning false tells xterm "do not handle this event"; the event
@@ -149,43 +201,6 @@ export function Terminal({
       return true;
     });
 
-    term.open(containerRef.current);
-
-    // ── OSC 6800 handler ──────────────────────────────────────────────────────
-    // Intercepts OSC 6800 sequences emitted by the TPK toolkit to surface
-    // session context in the per-tab UI. The handler returns true so xterm.js
-    // does not chain the sequence to its default handler (which would print or
-    // ignore it). The dispatch is wrapped in queueMicrotask to guarantee it
-    // lands outside the current synchronous stack (term.write() fires OSC
-    // handlers synchronously, which would violate React's render rules).
-    oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
-      const ctx = parseSessionContextPayload(data);
-      if (ctx) {
-        queueMicrotask(() => onSessionContextChangeRef.current?.(ctx));
-      }
-      return true;
-    });
-
-    // ── OSC 7 handler ─────────────────────────────────────────────────────────
-    // Intercepts OSC 7 sequences (file:// URI carrying the shell's CWD).
-    // Delegates all parsing/validation to parseOsc7Payload — handler body is
-    // a thin call-site only.
-    osc7Handler = term.parser.registerOscHandler(7, (data): boolean => {
-      const result = parseOsc7Payload(data);
-      if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
-      return true;
-    });
-
-    // ── OSC 7337 handler ──────────────────────────────────────────────────────
-    // Intercepts OSC 7337 sequences (git context: bare repo name + branch).
-    // Delegates all parsing/validation to parseOsc7337Payload — handler body is
-    // a thin call-site only.
-    osc7337Handler = term.parser.registerOscHandler(7337, (data): boolean => {
-      const result = parseOsc7337Payload(data);
-      if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
-      return true;
-    });
-
     // ── encodeBase64 helper ───────────────────────────────────────────────────
     // Encodes a xterm data string to UTF-8 bytes, then base64. Returns the
     // base64 string.
@@ -207,11 +222,12 @@ export function Terminal({
       return btoa(bin);
     }
 
-    // ── Register onData synchronously ─────────────────────────────────────────
-    // Registered here (before fitAddon.fit() and before the async IIFE) so that
-    // keystrokes typed during the spawn window are captured rather than dropped.
-    // While isReadyRef.current is false, keystrokes are buffered into
-    // pendingWrites. Once the PTY is ready, keystrokes are forwarded live.
+    // ── Register onData synchronously (Invariant I2) ──────────────────────────
+    // Registered here — BEFORE the font-load IIFE and the spawn IIFE — so that
+    // keystrokes typed during the font-load or spawn window are captured into
+    // pendingWrites rather than dropped. While isReadyRef.current is false,
+    // keystrokes are buffered. Once the PTY is ready, keystrokes are forwarded
+    // live. DO NOT move this registration inside either async IIFE.
     onDataDisposable = term.onData((data) => {
       if (!isReadyRef.current) {
         pendingWrites.push(data);
@@ -229,6 +245,12 @@ export function Terminal({
     });
 
     // FitAddon.fit() returns silently when dimensions are zero (not a throw).
+    // Run synchronously here (Invariant I3): the spawn IIFE reads
+    // fitAddon.proposeDimensions() synchronously to compute initial cols/rows.
+    // fit() running before fonts are loaded computes cell dimensions against
+    // the fallback font; this is acceptable because xterm re-measures inside
+    // term.open() against the resolved font. Any one-cell drift self-corrects
+    // via the ResizeObserver after term.open().
     fitAddon.fit();
 
     // ── ResizeObserver ────────────────────────────────────────────────────────
@@ -272,7 +294,90 @@ export function Terminal({
       spawnPromise.catch(() => undefined),
     );
 
-    // ── Async IIFE: subscribe to events after spawn resolves ──────────────────
+    // ── Two concurrent async IIFEs ────────────────────────────────────────────
+    //
+    // (a) Font-load IIFE — awaits MesloLGS NF, then opens the terminal and
+    //     registers OSC handlers. This IIFE must complete before xterm can
+    //     render output, but it does NOT block the spawn IIFE from starting.
+    //
+    // (b) Spawn IIFE (below) — awaits pty_spawn, subscribes to PTY events,
+    //     and flushes buffered keystrokes. Runs concurrently with (a).
+    //
+    // The two IIFEs are independent — neither awaits the other. Both check
+    // `cancelled` after every await to handle StrictMode fast-unmount.
+    //
+    // Invariant I2 (onData synchronous) and I3 (fit + observe synchronous)
+    // are satisfied by the registrations above, before either IIFE starts.
+
+    // ── (a) Font-load + open + OSC-register IIFE ─────────────────────────────
+    void (async () => {
+      // Await font load BEFORE term.open() so xterm measures glyph widths
+      // against MesloLGS NF, not the fallback monospace. This ordering is
+      // load-bearing per xterm.js docs and MUST NOT be reordered.
+      //
+      // Precondition: src/styles/fonts.css must be imported at module scope
+      // in src/main.tsx. loadFonts(['MesloLGS NF']) only resolves FontFace[]
+      // for @font-face rules already in document.fonts. Without that import,
+      // the addon rejects with the string error
+      // `'font family "MesloLGS NF" not registered in document.fonts'`.
+      //
+      // Alternative: pass FontFace constructor objects to loadFonts() directly
+      // to bypass the document.fonts precondition:
+      //   new FontFace('MesloLGS NF', 'url(/fonts/MesloLGS NF Regular.ttf)', { weight: '400' })
+      // This is documented here as an escape hatch for future maintainers.
+      try {
+        await webFontsAddon.loadFonts(["MesloLGS NF"]);
+      } catch (err) {
+        console.warn(
+          "[Terminal] webFontsAddon.loadFonts rejected — falling back to system monospace font:",
+          err,
+        );
+        // Fall through: term.open() below will use the fallback fontFamily.
+      }
+
+      // Re-check cancelled immediately after await — a StrictMode fast unmount
+      // during font load must not call term.open() on a disposed terminal.
+      if (cancelled) return;
+
+      term.open(containerRef.current!);
+
+      // ── OSC 6800 handler (Invariant I1: must be after term.open) ─────────────
+      // Intercepts OSC 6800 sequences emitted by the TPK toolkit to surface
+      // session context in the per-tab UI. The handler returns true so xterm.js
+      // does not chain the sequence to its default handler (which would print or
+      // ignore it). The dispatch is wrapped in queueMicrotask to guarantee it
+      // lands outside the current synchronous stack (term.write() fires OSC
+      // handlers synchronously, which would violate React's render rules).
+      oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
+        const ctx = parseSessionContextPayload(data);
+        if (ctx) {
+          queueMicrotask(() => onSessionContextChangeRef.current?.(ctx));
+        }
+        return true;
+      });
+
+      // ── OSC 7 handler ─────────────────────────────────────────────────────────
+      // Intercepts OSC 7 sequences (file:// URI carrying the shell's CWD).
+      // Delegates all parsing/validation to parseOsc7Payload — handler body is
+      // a thin call-site only.
+      osc7Handler = term.parser.registerOscHandler(7, (data): boolean => {
+        const result = parseOsc7Payload(data);
+        if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+        return true;
+      });
+
+      // ── OSC 7337 handler ──────────────────────────────────────────────────────
+      // Intercepts OSC 7337 sequences (git context: bare repo name + branch).
+      // Delegates all parsing/validation to parseOsc7337Payload — handler body is
+      // a thin call-site only.
+      osc7337Handler = term.parser.registerOscHandler(7337, (data): boolean => {
+        const result = parseOsc7337Payload(data);
+        if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+        return true;
+      });
+    })();
+
+    // ── (b) Spawn IIFE: subscribe to events after spawn resolves ─────────────
     void (async () => {
       let generation: number | undefined;
 

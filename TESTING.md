@@ -6,7 +6,7 @@ ai-dungeon uses three testing layers:
 
 1. **Unit and component tests** — Vitest + React Testing Library, covering individual React components and utilities in isolation using a jsdom DOM environment.
 2. **End-to-end tests** — Playwright, covering full user flows in a real Chromium browser against the running Vite dev server.
-3. **Rust tests** — future work; see the Rust Tests section below.
+3. **Rust tests** — `cargo test` unit tests covering PTY session management and locale resolution. See the Rust Tests section below.
 
 ## Quick Reference
 
@@ -62,6 +62,12 @@ npx playwright install chromium
 
 This downloads the Chromium browser binary. Without it, `pnpm test:e2e` will fail with a "browser not installed" error.
 
+### E2E specs
+
+| Spec file                             | What it covers                                                                                                                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `e2e/terminal-font-rendering.spec.ts` | Boots the dev server, adds a terminal card, and asserts `document.fonts.check('13px "MesloLGS NF"')` returns `true` — verifying the MesloLGS NF font is loaded before `term.open()` fires (issue #32). |
+
 ## Coverage
 
 `pnpm coverage` generates HTML, text summary, and lcov reports in the `coverage/` directory using V8 native coverage (no instrumentation required). The `coverage/` directory is gitignored.
@@ -102,9 +108,26 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 
 ## CI
 
-`pnpm lint`, `pnpm format:check`, and `pnpm test` run automatically on every pull request and push to `main` via the `check` job in `.github/workflows/test.yml`.
+`.github/workflows/test.yml` defines two parallel jobs that run on every pull request and push to `main`:
 
-Branch protection rules should be configured to require the `check` job before merging (follow-up item).
+| Job     | What it runs                                                                                                                                                   |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check` | `pnpm lint`, `pnpm format:check`, `pnpm test` — lint, format, and unit/component tests                                                                         |
+| `e2e`   | `pnpm exec playwright install --with-deps chromium` then `pnpm exec playwright test` — Playwright specs against the Vite dev server (no Tauri binary required) |
+
+The `e2e` job runs the Vite frontend only; the `playwright.config.ts` `webServer` block starts `pnpm dev` automatically, so no native system dependencies beyond Node.js and Chromium are needed on the runner.
+
+Branch protection rules should be configured to require both the `check` and `e2e` jobs before merging (follow-up item).
+
+### Powerlevel10K / MesloLGS NF font verification
+
+After `pnpm tauri dev` opens the app window, perform the following checks to confirm the font-loading integration and PTY locale are working correctly (issue #32).
+
+1. **Font presence** — Open DevTools console and run `document.fonts.check('13px "MesloLGS NF"')`. It must return `true`. A `false` means `src/styles/fonts.css` is not being imported in `main.tsx`.
+2. **Powerline glyph rendering** — If Powerlevel10k is installed in your shell, the prompt arrowheads must be flush against the preceding cell with no horizontal gap or boxed-question-mark placeholder. If p10k is not installed, run `printf '\xee\x82\xb0\n'` (a raw powerline right-arrow codepoint) and confirm it renders as a filled arrow, not a `?`.
+3. **UTF-8 locale** — Run `echo $LC_ALL` inside the terminal. The output must contain `UTF-8`. Run `locale` and confirm `LC_CTYPE` also contains `UTF-8`.
+4. **Non-ASCII characters** — Run `printf '\xe2\x98\x83\n'`. The snowman character ☃ must render correctly without corruption, confirming the PTY locale is in effect.
+5. **Multi-tab consistency** — Open three cards in quick succession. Confirm all three terminals render the same MesloLGS NF glyphs (verifies the font is fully loaded before `term.open()` on each card, not just the first).
 
 ### OSC 7 / OSC 7337 verification
 
@@ -128,12 +151,18 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Tests that exercise the PTY commands (`pty_spawn`, `pty_write`, `pty_resize`, `pty_kill`) at the real PTY device boundary are deferred as future work — a real PTY is unavailable in most CI environments and non-trivial to mock at the `portable-pty` trait boundary.
 
-The existing unit tests cover the map/generation layer without spawning a real shell:
+The unit tests cover the session map/generation layer and the UTF-8 locale resolver without spawning a real shell. All tests in `pty.rs::tests` are `#[serial]`-gated (via the `serial_test` crate) because the locale-resolver tests mutate process-global env vars; serialisation prevents races between tests. Each locale test also uses an `EnvGuard` RAII struct defined in the test module: `EnvGuard::set(key, value)` and `EnvGuard::remove(key)` save the current env-var value on construction and restore it in `Drop`, guaranteeing that a panicking assertion cannot leave the process environment dirty for subsequent tests.
 
-| Test                                                | What it covers                                                                                                                                         |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pty_spawn_rejects_duplicate_session_id`            | `try_reserve_session_id` returns `Err("session already exists: …")` on a duplicate sid and leaves the original reservation intact                      |
-| `pty_kill_with_stale_generation_is_noop`            | `pty_kill` with an old generation token is a no-op; the session at the newer generation survives                                                       |
-| `pty_kill_with_matching_generation_removes_session` | `pty_kill` with the matching generation removes the session                                                                                            |
-| `pty_kill_with_none_generation_removes_session`     | `pty_kill` with `None` removes the session unconditionally                                                                                             |
-| `pty_kill_command_accepts_missing_generation_field` | serde deserialises a JSON payload missing the `generation` key as `generation: None` (necessary — not sufficient — signal for Tauri IPC compatibility) |
+| Test                                                        | What it covers                                                                                                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pty_spawn_rejects_duplicate_session_id`                    | `try_reserve_session_id` returns `Err("session already exists: …")` on a duplicate sid and leaves the original reservation intact                      |
+| `pty_kill_with_stale_generation_is_noop`                    | `pty_kill` with an old generation token is a no-op; the session at the newer generation survives                                                       |
+| `pty_kill_with_matching_generation_removes_session`         | `pty_kill` with the matching generation removes the session                                                                                            |
+| `pty_kill_with_none_generation_removes_session`             | `pty_kill` with `None` removes the session unconditionally                                                                                             |
+| `pty_kill_command_accepts_missing_generation_field`         | serde deserialises a JSON payload missing the `generation` key as `generation: None` (necessary — not sufficient — signal for Tauri IPC compatibility) |
+| `resolve_pty_utf8_locale_returns_lc_all_when_utf8`          | When `LC_ALL` is already a UTF-8 locale, the helper returns it unchanged (priority 1)                                                                  |
+| `resolve_pty_utf8_locale_rejects_substring_utf8_in_lc_all`  | A value like `notUTF-8-locale` that contains "utf-8" as a substring but is not a real locale does not satisfy the UTF-8 check                          |
+| `resolve_pty_utf8_locale_rejects_substring_utf8_in_lang`    | Same substring guard for `LANG`                                                                                                                        |
+| `resolve_pty_utf8_locale_accepts_utf8_without_hyphen`       | Values using `UTF8` (no hyphen) are accepted as UTF-8 locales                                                                                          |
+| `resolve_pty_utf8_locale_promotes_lang_when_lc_all_missing` | When `LC_ALL` is unset, the helper promotes a UTF-8 `LANG` value (priority 2)                                                                          |
+| `resolve_pty_utf8_locale_falls_back_to_platform_default`    | When neither `LC_ALL` nor `LANG` is a UTF-8 locale, the helper returns `en_US.UTF-8` (macOS) or `C.UTF-8` (other Unix)                                 |

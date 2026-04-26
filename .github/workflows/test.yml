@@ -39,3 +39,33 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    # The webServer in playwright.config.ts runs `pnpm dev` (Vite frontend only —
+    # no Tauri desktop binary is required). This makes the e2e suite runnable in a
+    # standard GitHub Actions Linux runner without any native system dependencies
+    # beyond Node.js and a Chromium browser.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Playwright e2e tests
+        run: pnpm exec playwright test

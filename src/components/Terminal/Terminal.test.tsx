@@ -7,6 +7,22 @@
 const onDataDisposeSpy = vi.fn();
 const onDataSpy = vi.fn().mockReturnValue({ dispose: onDataDisposeSpy });
 
+// Deferred-loadFonts factory: lets each test control when loadFonts resolves.
+// Initialised in beforeEach so each test gets a fresh deferred.
+let resolveLoadFonts!: (value: FontFace[]) => void;
+let loadFontsPromise!: Promise<FontFace[]>;
+
+const loadFontsSpy = vi.fn();
+
+vi.mock("@xterm/addon-web-fonts", () => {
+  function MockWebFontsAddon() {
+    return {
+      loadFonts: loadFontsSpy,
+    };
+  }
+  return { WebFontsAddon: vi.fn().mockImplementation(MockWebFontsAddon) };
+});
+
 // Per-OSC-code dispose spies — declared at module scope but initialised in
 // beforeEach so each test gets fresh spies.
 let osc6800DisposeSpy: ReturnType<typeof vi.fn>;
@@ -99,6 +115,11 @@ describe("Terminal", () => {
     vi.clearAllMocks();
     // Clear captured unlisten spies from the previous test.
     unlistenSpies.length = 0;
+
+    // Default: loadFonts resolves immediately with a one-element FontFace stub.
+    // Tests that need to control timing call deferLoadFonts() to switch to a
+    // deferred promise before rendering.
+    loadFontsSpy.mockResolvedValue([{}] as unknown as FontFace[]);
 
     // Clear the module-level spawn-chain Map so prior tests' settled (or
     // in-flight) kill promises do not block subsequent tests' spawn calls.
@@ -522,25 +543,29 @@ describe("Terminal", () => {
 
   // ── OSC 6800 handler ─────────────────────────────────────────────────────
 
-  it("calls term.parser.registerOscHandler with 6800 and a function on mount", () => {
+  it("calls term.parser.registerOscHandler with 6800 and a function on mount", async () => {
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
         onSessionContextChange={vi.fn()}
       />,
     );
-    expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
+    });
   });
 
-  it("registers OSC handlers for 6800, 7, and 7337 on mount", () => {
+  it("registers OSC handlers for 6800, 7, and 7337 on mount", async () => {
     renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
-    const registeredCodes = registerOscHandlerSpy.mock.calls.map((c: unknown[]) => c[0]);
-    expect(registeredCodes).toContain(6800);
-    expect(registeredCodes).toContain(7);
-    expect(registeredCodes).toContain(7337);
+    await vi.waitFor(() => {
+      const registeredCodes = registerOscHandlerSpy.mock.calls.map((c: unknown[]) => c[0]);
+      expect(registeredCodes).toContain(6800);
+      expect(registeredCodes).toContain(7);
+      expect(registeredCodes).toContain(7337);
+    });
   });
 
-  it("OSC handler invoked with valid payload calls onSessionContextChange once with parsed SessionContext", () => {
+  it("OSC handler invoked with valid payload calls onSessionContextChange once with parsed SessionContext", async () => {
     const onSessionContextChange = vi.fn();
     renderWithProviders(
       <Terminal
@@ -548,6 +573,11 @@ describe("Terminal", () => {
         onSessionContextChange={onSessionContextChange}
       />,
     );
+
+    // Wait for OSC handlers to be registered (they run inside the font-load IIFE).
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
+    });
 
     // Extract the registered OSC 6800 handler callback using code-specific find.
     const osc6800Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 6800)![1];
@@ -586,7 +616,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC handler invoked with malformed JSON does not call onSessionContextChange", () => {
+  it("OSC handler invoked with malformed JSON does not call onSessionContextChange", async () => {
     const onSessionContextChange = vi.fn();
     renderWithProviders(
       <Terminal
@@ -594,6 +624,10 @@ describe("Terminal", () => {
         onSessionContextChange={onSessionContextChange}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
+    });
 
     const osc6800Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 6800)![1];
     expect(osc6800Handler).toBeDefined();
@@ -609,13 +643,17 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC handler returns true", () => {
+  it("OSC handler returns true", async () => {
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
         onSessionContextChange={vi.fn()}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
+    });
 
     const osc6800Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 6800)![1];
     expect(osc6800Handler).toBeDefined();
@@ -837,7 +875,7 @@ describe("Terminal", () => {
 
   // ── OSC 7 handler ─────────────────────────────────────────────────────────
 
-  it("OSC 7 handler with valid file:// URI calls onSessionContextPatch with decoded workingDirectory after microtask", () => {
+  it("OSC 7 handler with valid file:// URI calls onSessionContextPatch with decoded workingDirectory after microtask", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -845,6 +883,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -866,7 +908,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with percent-encoded path decodes correctly", () => {
+  it("OSC 7 handler with percent-encoded path decodes correctly", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -874,6 +916,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -890,7 +936,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with empty-host file URI (file:///path) decodes correctly", () => {
+  it("OSC 7 handler with empty-host file URI (file:///path) decodes correctly", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -898,6 +944,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -914,7 +964,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with malformed URL does not call onSessionContextPatch", () => {
+  it("OSC 7 handler with malformed URL does not call onSessionContextPatch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -922,6 +972,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -936,7 +990,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with non-file: scheme does not call onSessionContextPatch", () => {
+  it("OSC 7 handler with non-file: scheme does not call onSessionContextPatch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -944,6 +998,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -959,7 +1017,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with malformed percent-encoding falls back to raw pathname", () => {
+  it("OSC 7 handler with malformed percent-encoding falls back to raw pathname", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -967,6 +1025,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -983,7 +1045,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with workingDirectory exceeding 1024 chars is silently dropped", () => {
+  it("OSC 7 handler with workingDirectory exceeding 1024 chars is silently dropped", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -991,6 +1053,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -1006,7 +1072,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7 handler with control characters in path is silently dropped", () => {
+  it("OSC 7 handler with control characters in path is silently dropped", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1014,6 +1080,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
 
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
@@ -1031,7 +1101,7 @@ describe("Terminal", () => {
 
   // ── OSC 7337 handler ──────────────────────────────────────────────────────
 
-  it("OSC 7337 handler with bare repo name (production wire format) calls onSessionContextPatch with branch only", () => {
+  it("OSC 7337 handler with bare repo name (production wire format) calls onSessionContextPatch with branch only", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1039,6 +1109,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1056,7 +1130,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with owner/name form calls onSessionContextPatch with full repo + branch", () => {
+  it("OSC 7337 handler with owner/name form calls onSessionContextPatch with full repo + branch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1064,6 +1138,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1081,7 +1159,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with empty payload calls onSessionContextPatch with cleared branch and repo", () => {
+  it("OSC 7337 handler with empty payload calls onSessionContextPatch with cleared branch and repo", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1089,6 +1167,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1106,7 +1188,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with malformed payload (no tab) does not call onSessionContextPatch", () => {
+  it("OSC 7337 handler with malformed payload (no tab) does not call onSessionContextPatch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1114,6 +1196,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1128,7 +1214,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with empty branch field does not call onSessionContextPatch", () => {
+  it("OSC 7337 handler with empty branch field does not call onSessionContextPatch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1136,6 +1222,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1150,7 +1240,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with empty repo field does not call onSessionContextPatch", () => {
+  it("OSC 7337 handler with empty repo field does not call onSessionContextPatch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1158,6 +1248,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1172,7 +1266,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with owner/name where one side is empty does not call onSessionContextPatch", () => {
+  it("OSC 7337 handler with owner/name where one side is empty does not call onSessionContextPatch", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1180,6 +1274,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1200,7 +1298,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with branch over 256 chars (bare-name path) is silently dropped", () => {
+  it("OSC 7337 handler with branch over 256 chars (bare-name path) is silently dropped", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1208,6 +1306,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1223,7 +1325,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with control char in branch is silently dropped", () => {
+  it("OSC 7337 handler with control char in branch is silently dropped", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1231,6 +1333,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1245,7 +1351,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with control char in owner segment is silently dropped", () => {
+  it("OSC 7337 handler with control char in owner segment is silently dropped", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1253,6 +1359,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1267,7 +1377,7 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with over-length branch in owner/name path is silently dropped", () => {
+  it("OSC 7337 handler with over-length branch in owner/name path is silently dropped", async () => {
     const onSessionContextPatch = vi.fn();
     renderWithProviders(
       <Terminal
@@ -1275,6 +1385,10 @@ describe("Terminal", () => {
         onSessionContextPatch={onSessionContextPatch}
       />,
     );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
     expect(osc7337Handler).toBeDefined();
@@ -1300,9 +1414,9 @@ describe("Terminal", () => {
       />,
     );
 
-    // Wait for async setup to complete.
+    // Wait for OSC handlers to be registered (they are inside the font-load IIFE).
     await vi.waitFor(() => {
-      expect(onDataSpy).toHaveBeenCalled();
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
     });
 
     const termInstance = getTermInstance();
@@ -1353,6 +1467,11 @@ describe("Terminal", () => {
       <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionContextPatch={cbA} />,
     );
 
+    // Wait for OSC 7 handler to be registered.
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
+
     const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     expect(osc7Handler).toBeDefined();
 
@@ -1375,6 +1494,147 @@ describe("Terminal", () => {
     // cbA must NOT have been called again.
     expect(cbA).toHaveBeenCalledTimes(1);
   });
+
+  // ── WebFontsAddon load-order invariants ──────────────────────────────────────
+
+  it("awaits webFontsAddon.loadFonts before calling term.open", async () => {
+    // Switch to a deferred loadFonts before rendering so we control timing.
+    loadFontsPromise = new Promise<FontFace[]>((resolve) => {
+      resolveLoadFonts = resolve;
+    });
+    loadFontsSpy.mockReturnValue(loadFontsPromise);
+
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+    const termInstance = getTermInstance();
+
+    // Give any synchronous setup a chance to run.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // term.open must NOT have been called while loadFonts is pending.
+    expect(termInstance.open).not.toHaveBeenCalled();
+
+    // Resolve loadFonts with a one-element FontFace stub.
+    await act(async () => {
+      resolveLoadFonts([{}] as unknown as FontFace[]);
+      await loadFontsPromise;
+    });
+
+    // After loadFonts resolves, term.open must be called exactly once.
+    await vi.waitFor(() => {
+      expect(termInstance.open).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("opens terminal and emits console.warn when loadFonts rejects (graceful degradation)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    loadFontsSpy.mockRejectedValueOnce(
+      'font family "MesloLGS NF" not registered in document.fonts',
+    );
+
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+    const termInstance = getTermInstance();
+
+    // term.open must still be called despite loadFonts rejection.
+    await vi.waitFor(() => {
+      expect(termInstance.open).toHaveBeenCalledTimes(1);
+    });
+
+    // A console.warn must have been emitted with the rejection reason.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[Terminal] webFontsAddon.loadFonts rejected"),
+      expect.anything(),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("does not call term.open if the component unmounts during font load", async () => {
+    // Switch to a deferred loadFonts before rendering.
+    loadFontsPromise = new Promise<FontFace[]>((resolve) => {
+      resolveLoadFonts = resolve;
+    });
+    loadFontsSpy.mockReturnValue(loadFontsPromise);
+
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
+    const termInstance = getTermInstance();
+
+    // Unmount before loadFonts resolves.
+    act(() => {
+      unmount();
+    });
+
+    // Now resolve loadFonts — the IIFE must bail due to cancelled=true.
+    await act(async () => {
+      resolveLoadFonts([{}] as unknown as FontFace[]);
+      await loadFontsPromise;
+    });
+
+    // term.open must never have been called.
+    expect(termInstance.open).not.toHaveBeenCalled();
+  });
+
+  it("buffers keystrokes typed during font load and flushes them after spawn resolves", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    // Deferred loadFonts and deferred spawn so we can verify buffering through
+    // both windows independently.
+    loadFontsPromise = new Promise<FontFace[]>((resolve) => {
+      resolveLoadFonts = resolve;
+    });
+    loadFontsSpy.mockReturnValue(loadFontsPromise);
+
+    let resolveSpawn!: (value: number) => void;
+    const spawnPromise = new Promise<number>((resolve) => {
+      resolveSpawn = resolve;
+    });
+    mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+
+    // Wait for onData to be registered synchronously (invariant I2: it must
+    // be registered before the font-load IIFE, not inside it).
+    await vi.waitFor(() => {
+      expect(onDataSpy).toHaveBeenCalled();
+    });
+
+    // Extract the onData callback.
+    const onDataCallback = onDataSpy.mock.calls[onDataSpy.mock.calls.length - 1][0] as (
+      data: string,
+    ) => void;
+
+    // Simulate a keystroke while loadFonts is still pending.
+    onDataCallback("z");
+
+    // pty_write must NOT have been called yet — keystroke is buffered.
+    const ptyWritesBefore = (mockInvoke.mock.calls as [string][]).filter(
+      (c) => c[0] === "pty_write",
+    );
+    expect(ptyWritesBefore).toHaveLength(0);
+
+    // Resolve loadFonts (term.open fires now), then resolve spawn.
+    await act(async () => {
+      resolveLoadFonts([{}] as unknown as FontFace[]);
+      await loadFontsPromise;
+    });
+
+    await act(async () => {
+      resolveSpawn(1);
+      await spawnPromise;
+    });
+
+    // After spawn resolves the flush loop drains pendingWrites.
+    await vi.waitFor(() => {
+      const ptyWriteCalls = (mockInvoke.mock.calls as [string, { dataB64: string }][])
+        .filter((c) => c[0] === "pty_write")
+        .map((c) => c[1].dataB64);
+      expect(ptyWriteCalls).toContain("eg=="); // base64("z")
+    });
+  });
 });
 
 // ── Custom key event handler ───────────────────────────────────────────────────
@@ -1388,6 +1648,8 @@ describe("custom key event handler", () => {
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
       return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
     }) as unknown as typeof ResizeObserver;
+    // Reset loadFonts to resolve immediately so key-handler tests don't hang.
+    loadFontsSpy.mockResolvedValue([{}] as unknown as FontFace[]);
   });
 
   function getHandler() {
