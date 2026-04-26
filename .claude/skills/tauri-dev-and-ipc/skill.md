@@ -14,6 +14,8 @@ worktree (define-ipc-surface-auditor-skill, define-testing-and-qa-claude-code-sk
 at the time this file was created. The structure follows the issue #15 specification
 directly, as no project precedent existed to defer to. -->
 
+> **Scope note:** This skill covers Tauri work in the `ai-dungeon` repo specifically. Prefer existing repo patterns over generic Tauri assumptions. When this skill and external framework docs disagree, treat the live examples in `src-tauri/src/lib.rs` and `src-tauri/src/pty.rs` as the source of truth.
+
 ## Goal
 
 After reading this skill you will be able to:
@@ -35,7 +37,7 @@ ai-dungeon/
 │   ├── Cargo.toml                  # tauri = "2", portable-pty, base64, serde
 │   ├── tauri.conf.json             # beforeDevCommand: "pnpm dev", devUrl: "http://localhost:1420"
 │   ├── capabilities/
-│   │   └── default.json            # Tauri v2 capability file — all permissions live here
+│   │   └── default.json            # Tauri v2 capability file — all project permissions currently live here
 │   ├── gen/schemas/
 │   │   └── desktop-schema.json     # Auto-generated; $schema target for capability files
 │   └── src/
@@ -248,9 +250,7 @@ Key points:
 
 Capabilities replaced the Tauri v1 `allowlist` in `tauri.conf.json`. **Do not use v1 `allowlist` patterns — they are silently ignored in Tauri v2.**
 
-All frontend permissions are declared in JSON files under `src-tauri/capabilities/`. The project currently has one file:
-
-`src-tauri/capabilities/default.json` (exact contents):
+In this project, all frontend permissions are currently declared in a single file: `src-tauri/capabilities/default.json`.
 
 ```json
 {
@@ -270,7 +270,7 @@ Field reference:
 - `windows` — list of window labels this capability applies to. `"main"` is the only window in this project.
 - `permissions` — list of Tauri permission identifiers. `core:default` enables the standard Tauri core APIs; `core:event:default` enables the event system used by `listen()`.
 
-**If a frontend `invoke()` call fails with a permission/capability error**, the fix is almost always to add a permission string to the `permissions` array — not to change Rust code. For example, adding shell open support would require `"shell:allow-open"`. Do not modify existing capability files if only adding a new command (commands do not require explicit permission entries beyond `core:default`).
+**If a frontend `invoke()` call fails with a permission/capability error**, the fix is almost always to add a permission string to the `permissions` array — not to change Rust code. For example, adding shell open support would require `"shell:allow-open"`. In this repo's current state, adding a plain command handler typically does not require capability changes — `core:default` covers the standard invoke path. The exception is commands that expose a new API surface (filesystem, shell, dialog, etc.); those need a matching permission string.
 
 You may create additional capability files (e.g., `src-tauri/capabilities/shell.json`) for logical grouping, but must keep the `$schema` path correct relative to the new file's location.
 
@@ -346,6 +346,15 @@ For state types: ensure they implement `Send + Sync` (usually satisfied if all f
 
 **Cause:** Event name string mismatch between the Rust emitter and the TypeScript listener. Tauri event names are case-sensitive and matched byte-for-byte.
 **Fix:** Log both the emit name and the listen name and compare character-by-character. Common mistakes: wrong capitalisation, missing colon separator, missing trailing session id, or using a hardcoded literal that does not interpolate the session id correctly.
+
+## When in Doubt — Validation Order
+
+When a command, event, or capability issue is unclear, work through these sources in order — each narrows the search space before escalating to the next:
+
+1. **Rust compiler errors** — `cargo` output in the `pnpm tauri dev` terminal. Trait missing, type mismatch, and registration errors surface here first.
+2. **Tauri runtime error text** — the error string returned to the TypeScript `invoke()` call (or logged to the webview DevTools console). "command not found" and capability denial messages appear here.
+3. **Existing repo patterns in `pty.rs` and `lib.rs`** — the live implementation is the authoritative example. If the skill and the codebase disagree, follow the codebase.
+4. **Capability JSON** — `src-tauri/capabilities/default.json` is the last stop for permission-related failures. Add a permission string here only after the above three sources have been checked.
 
 ## Output Expectations
 
