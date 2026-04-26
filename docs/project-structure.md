@@ -17,7 +17,7 @@ ai-dungeon/
 │           ├── AppLayout.tsx          # Mantine Tabs + AppShell — Tabs.List in navbar, Tabs.Panel per card in main
 │           ├── NavBar.tsx             # Sidebar — card list as Tabs.Tab items, Add/Remove controls; renders SessionCard per tab
 │           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges
-│           ├── SessionCard.test.tsx   # Unit tests for SessionCard (11 cases)
+│           ├── SessionCard.test.tsx   # Unit tests for SessionCard (16 cases)
 │           ├── sessionMeta.mock.ts    # Deterministic mock SessionMeta fixtures keyed by card id
 │           └── index.ts              # Barrel export
 ├── src-tauri/        # Rust backend (Tauri)

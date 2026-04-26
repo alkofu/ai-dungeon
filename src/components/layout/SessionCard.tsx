@@ -1,5 +1,6 @@
 import type React from "react";
 import { ActionIcon, Badge, Group, Stack, Text, Tooltip } from "@mantine/core";
+import { IconCircleDot, IconGitPullRequest } from "@tabler/icons-react";
 import { getMockSessionMeta } from "./sessionMeta.mock";
 
 interface SessionCardProps {
@@ -82,12 +83,21 @@ export function SessionCard({ cardId, onRemove }: SessionCardProps) {
 
       {/* Row 3: PR badge, Issue badge, placeholder badge */}
       <Group gap="xs" wrap="nowrap">
-        <Badge size="xs" variant="light">
+        <Badge
+          size="xs"
+          variant="light"
+          leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
+        >
           {meta.prNumber ? `PR #${meta.prNumber}` : "PR —"}
         </Badge>
-        <Badge size="xs" variant="light">
+        <Badge
+          size="xs"
+          variant="light"
+          leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
+        >
           {meta.issueNumber ? `#${meta.issueNumber}` : "Issue —"}
         </Badge>
+        {/* No leftSection: placeholder badge intentionally renders no icon. */}
         <Badge size="xs" variant="light">
           —
         </Badge>

@@ -122,10 +122,22 @@ describe("SessionCard", () => {
     expect(screen.getByText("PR —")).toBeInTheDocument();
   });
 
+  it("9d. PR badge renders the pull-request icon when prNumber is undefined", () => {
+    // Fixture 2 has no prNumber — icon must still be present in the empty state
+    renderInTabs(CARD_ID_F2);
+    expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
+  });
+
   it("9b. PR badge shows 'PR #n' when prNumber is defined", () => {
     // Fixture 0 has prNumber: 42
     renderInTabs(CARD_ID_F0);
     expect(screen.getByText("PR #42")).toBeInTheDocument();
+  });
+
+  it("9c. PR badge renders the pull-request icon when prNumber is defined", () => {
+    // Fixture 0 has prNumber: 42
+    renderInTabs(CARD_ID_F0);
+    expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
   });
 
   it("10a. Issue badge shows 'Issue —' when issueNumber is undefined", () => {
@@ -134,16 +146,38 @@ describe("SessionCard", () => {
     expect(screen.getByText("Issue —")).toBeInTheDocument();
   });
 
+  it("10d. Issue badge renders the issue icon when issueNumber is undefined", () => {
+    // Fixture 1 has no issueNumber — icon must still be present in the empty state
+    renderInTabs(CARD_ID_F1);
+    expect(screen.getByRole("img", { name: "Issue" })).toBeInTheDocument();
+  });
+
   it("10b. Issue badge shows '#n' when issueNumber is defined", () => {
     // Fixture 0 has issueNumber: 17
     renderInTabs(CARD_ID_F0);
     expect(screen.getByText("#17")).toBeInTheDocument();
   });
 
+  it("10c. Issue badge renders the issue icon when issueNumber is defined", () => {
+    // Fixture 0 has issueNumber: 17
+    renderInTabs(CARD_ID_F0);
+    expect(screen.getByRole("img", { name: "Issue" })).toBeInTheDocument();
+  });
+
   it("11. third placeholder badge with text '—' is always present", () => {
     renderInTabs(CARD_ID_F3);
     // Fixture 3 has neither PR nor Issue, so only the standalone '—' badge remains
     expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("11b. placeholder badge renders no icon", () => {
+    // Fixture 3 has neither PR nor Issue
+    const { container } = renderInTabs(CARD_ID_F3);
+    const badges = container.querySelectorAll(".mantine-Badge-root");
+    expect(badges).toHaveLength(3);
+    const thirdBadge = badges[2];
+    expect(thirdBadge.querySelectorAll('[role="img"]')).toHaveLength(0);
+    expect(thirdBadge.textContent).toContain("—");
   });
 
   it("mock module is deterministic: same cardId returns deeply equal objects", () => {
