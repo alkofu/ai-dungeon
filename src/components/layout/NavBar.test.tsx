@@ -93,6 +93,44 @@ describe("NavBar", () => {
     expect(onRemoveCard).toHaveBeenCalledWith("a");
   });
 
+  // This test is a style-application guard, not a behavioural overflow test. The JSDOM test
+  // environment in `src/test-utils/setup.ts` does not import `@mantine/core/styles.css`, so
+  // `getComputedStyle` reflects only inline styles. The test verifies that the JSX statically
+  // applies the required style declarations; it cannot detect future regressions where overflow
+  // re-appears via a different mechanism (e.g., a child element whose own width pushes past the
+  // constraint).
+  //
+  // Behavioural validation (no horizontal overflow with realistic content) is performed manually
+  // in Step 4 and is the load-bearing safeguard. A future Playwright end-to-end test is recorded
+  // as a follow-up but is out of scope for this fix.
+  //
+  // The assertion that `w="100%"` resolves to inline `style={{ width: "100%" }}` is correct in
+  // Mantine v9 (verified by Truthhammer against the installed version) but the resolution chain
+  // is a Mantine implementation detail and could theoretically change in a future major version.
+  // If Mantine is upgraded across a major version boundary, re-verify this assertion.
+  it("applies width and overflow style declarations to Tabs.Tab so SessionCard does not overflow the navbar", () => {
+    renderNavBar(
+      <NavBar
+        cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }]}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+      />,
+    );
+
+    const tab = screen.getByRole("tab");
+
+    expect(tab).toHaveStyle({ overflow: "hidden" });
+    expect(tab).toHaveStyle({ whiteSpace: "normal" });
+    expect(tab).toHaveStyle({ display: "block" });
+    expect(tab).toHaveStyle({ width: "100%" });
+
+    const innerSpan = tab.querySelector(":scope > span");
+    expect(innerSpan).not.toBeNull();
+    expect(innerSpan).toHaveStyle({ width: "100%" });
+    expect(innerSpan).toHaveStyle({ textAlign: "left" });
+    expect(innerSpan).toHaveStyle({ whiteSpace: "normal" });
+  });
+
   it("does NOT trigger the tab onChange when the close button is clicked (stopPropagation)", async () => {
     // This test verifies that event.stopPropagation() on the CloseButton prevents
     // the click from bubbling to the Tabs.Tab and activating it before removal.
