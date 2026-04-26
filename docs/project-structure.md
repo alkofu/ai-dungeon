@@ -4,14 +4,17 @@
 ai-dungeon/
 ├── src/              # React + TypeScript frontend
 │   ├── main.tsx      # Entry point — mounts MantineProvider, imports xterm CSS
-│   ├── App.tsx       # Root component — wrapped in AppLayout
+│   ├── App.tsx       # Root component — useReducer for cards + activeId; owns tab state
+│   ├── types/
+│   │   └── card.ts   # Card type ({ id: string })
 │   └── components/
 │       ├── Terminal/
-│       │   ├── Terminal.tsx   # xterm.js wrapper — live shell via PTY IPC, FitAddon, base64 I/O
+│       │   ├── Terminal.tsx   # xterm.js wrapper — accepts sessionId prop; PTY IPC, FitAddon, base64 I/O
 │       │   ├── index.ts       # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx  # AppShell layout (header, navbar, main)
+│           ├── AppLayout.tsx  # Mantine Tabs + AppShell — Tabs.List in navbar, Tabs.Panel per card in main
+│           ├── NavBar.tsx     # Sidebar — card list as Tabs.Tab items, Add/Remove controls
 │           └── index.ts       # Barrel export
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
