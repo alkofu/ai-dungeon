@@ -3,20 +3,27 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
-export interface SessionContext {
-  cwd: string | null;
-  git: { repo: string; branch: string } | null;
-}
+import {
+  parseSessionContextPayload,
+  parseOsc7Payload,
+  parseOsc7337Payload,
+} from "../../types/sessionPayload";
+import type { SessionContext } from "../../types/session";
 
 interface TerminalProps {
   // The caller supplies a stable UUID that identifies this PTY session. The
   // same sessionId across re-renders means the same shell; a different sessionId
   // triggers a full unmount/re-spawn via the useEffect dependency array.
   sessionId: string;
-  // Called whenever an OSC 7 or OSC 7337 sequence arrives with updated context.
-  // Optional so existing callers that omit it continue to type-check.
-  onContextChange?: (ctx: SessionContext) => void;
+  // Called whenever an OSC 6800 payload is received and successfully parsed.
+  // Fires with a fully-formed SessionContext (full replacement).
+  // Captured via a ref so the OSC handler always uses the latest version without
+  // needing to be in the useEffect dependency array (which would restart the PTY
+  // session on every re-render of the parent).
+  onSessionContextChange?: (ctx: SessionContext) => void;
+  // Called whenever an OSC 7 or OSC 7337 payload is received and successfully parsed.
+  // Fires with a partial patch that is merged into the existing SessionContext record.
+  onSessionContextPatch?: (patch: Partial<SessionContext>) => void;
 }
 
 // ── Per-sid spawn-chain (Ruinor F-1 resolution) ───────────────────────────────
@@ -52,13 +59,21 @@ export function _clearSpawnChainForTesting(): void {
   spawnChain.clear();
 }
 
-export function Terminal({ sessionId, onContextChange }: TerminalProps) {
+export function Terminal({
+  sessionId,
+  onSessionContextChange,
+  onSessionContextPatch,
+}: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Stable ref so OSC handlers always call the latest callback without needing
-  // it in the useEffect dependency array (which would re-mount the terminal on
-  // every render where the parent re-creates the callback reference).
-  const onContextChangeRef = useRef(onContextChange);
-  onContextChangeRef.current = onContextChange;
+
+  // Keep refs to the latest callbacks so the OSC handlers always call the current
+  // version without adding them to the useEffect dependency array (which would
+  // cause the effect — and therefore the PTY session — to restart every time the
+  // parent re-renders). Assignments run on every render (component-top scope).
+  const onSessionContextChangeRef = useRef(onSessionContextChange);
+  onSessionContextChangeRef.current = onSessionContextChange;
+  const onSessionContextPatchRef = useRef(onSessionContextPatch);
+  onSessionContextPatchRef.current = onSessionContextPatch;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -77,6 +92,11 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
     // Collect the onData disposable for cleanup.
     let onDataDisposable: { dispose: () => void } | undefined;
 
+    // Collect the OSC handler disposables for cleanup.
+    let oscDisposable: { dispose: () => void } | undefined;
+    let osc7Handler: { dispose: () => void } | undefined;
+    let osc7337Handler: { dispose: () => void } | undefined;
+
     // Buffer for keystrokes that arrive before the PTY is ready. Each entry is
     // a discrete xterm onData string and is encoded + sent independently to
     // preserve per-keystroke handling semantics.
@@ -88,46 +108,40 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
 
-    // ── OSC 7 / OSC 7337 context handlers ────────────────────────────────────
-    // Closure-scoped state threads both fields through each handler.
-    // Per-effect-instance: resets on sessionId change (correct — new shell session)
-    // but overwrites parent state if the Terminal remounts without a sessionId change.
-    let lastCwd: string | null = null;
-    let lastGit: { repo: string; branch: string } | null = null;
-
-    // OSC 7: file://hostname/path — update CWD.
-    // Uses new URL().pathname to correctly handle both file://hostname/path and
-    // file:///path (empty host). decodeURIComponent handles percent-encoded
-    // characters (e.g. spaces in directory names); the inner try/catch falls back
-    // to the raw pathname if the encoding is malformed.
-    const osc7Handler = term.parser.registerOscHandler(7, (data): boolean | Promise<boolean> => {
-      try {
-        try {
-          lastCwd = decodeURIComponent(new URL(data).pathname);
-        } catch {
-          lastCwd = new URL(data).pathname; // fallback: use raw pathname if decode fails
-        }
-      } catch {
-        // Malformed URL — leave lastCwd unchanged.
+    // ── OSC 6800 handler ──────────────────────────────────────────────────────
+    // Intercepts OSC 6800 sequences emitted by the TPK toolkit to surface
+    // session context in the per-tab UI. The handler returns true so xterm.js
+    // does not chain the sequence to its default handler (which would print or
+    // ignore it). The dispatch is wrapped in queueMicrotask to guarantee it
+    // lands outside the current synchronous stack (term.write() fires OSC
+    // handlers synchronously, which would violate React's render rules).
+    oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
+      const ctx = parseSessionContextPayload(data);
+      if (ctx) {
+        queueMicrotask(() => onSessionContextChangeRef.current?.(ctx));
       }
-      onContextChangeRef.current?.({ cwd: lastCwd, git: lastGit });
       return true;
     });
 
-    // OSC 7337: custom git context — empty payload clears, "repo\tbranch" sets.
-    const osc7337Handler = term.parser.registerOscHandler(
-      7337,
-      (data): boolean | Promise<boolean> => {
-        if (data === "") {
-          lastGit = null;
-        } else {
-          const [repo, branch] = data.split("\t");
-          lastGit = { repo, branch };
-        }
-        onContextChangeRef.current?.({ cwd: lastCwd, git: lastGit });
-        return true;
-      },
-    );
+    // ── OSC 7 handler ─────────────────────────────────────────────────────────
+    // Intercepts OSC 7 sequences (file:// URI carrying the shell's CWD).
+    // Delegates all parsing/validation to parseOsc7Payload — handler body is
+    // a thin call-site only.
+    osc7Handler = term.parser.registerOscHandler(7, (data): boolean => {
+      const result = parseOsc7Payload(data);
+      if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+      return true;
+    });
+
+    // ── OSC 7337 handler ──────────────────────────────────────────────────────
+    // Intercepts OSC 7337 sequences (git context: bare repo name + branch).
+    // Delegates all parsing/validation to parseOsc7337Payload — handler body is
+    // a thin call-site only.
+    osc7337Handler = term.parser.registerOscHandler(7337, (data): boolean => {
+      const result = parseOsc7337Payload(data);
+      if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+      return true;
+    });
 
     // ── encodeBase64 helper ───────────────────────────────────────────────────
     // Encodes a xterm data string to UTF-8 bytes, then base64. Returns the
@@ -304,9 +318,10 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
       // this unmounted instance.
       pendingWrites.length = 0;
       observer.disconnect();
+      oscDisposable?.dispose(); // OSC 6800
+      osc7Handler?.dispose(); // OSC 7
+      osc7337Handler?.dispose(); // OSC 7337
       onDataDisposable?.dispose();
-      osc7Handler.dispose();
-      osc7337Handler.dispose();
       unlistenOutput?.();
       unlistenExit?.();
       // Defer pty_kill until the in-flight spawnPromise has settled.
