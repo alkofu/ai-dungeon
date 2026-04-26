@@ -5,16 +5,13 @@ import { Tabs } from "@mantine/core";
 import { renderWithProviders } from "../../test-utils/render";
 import { SessionCard } from "./SessionCard";
 import { getMockSessionMeta, SESSION_META_FIXTURES } from "./sessionMeta.mock";
-import type { SessionContext } from "../../App";
-
-const NULL_CONTEXT: SessionContext = { cwd: null, git: null };
 
 // Cards 1–5 are wrapped in Tabs context matching production rendering.
-function renderInTabs(cardId: string, onRemove = vi.fn(), context: SessionContext = NULL_CONTEXT) {
+function renderInTabs(cardId: string, onRemove = vi.fn()) {
   return renderWithProviders(
     <Tabs value={null} onChange={() => {}} orientation="vertical">
       <Tabs.Tab value={cardId}>
-        <SessionCard cardId={cardId} onRemove={onRemove} context={context} />
+        <SessionCard cardId={cardId} onRemove={onRemove} />
       </Tabs.Tab>
     </Tabs>,
   );
@@ -86,44 +83,37 @@ describe("SessionCard", () => {
     expect(onRemove).toHaveBeenCalledWith("a");
   });
 
-  it("6. tooltip on path-tail shows the full cwd when git is present", async () => {
+  it("6. tooltip on repo name shows owner/name", async () => {
     const user = userEvent.setup();
-    const context: SessionContext = {
-      cwd: "/home/user/work/backend-service/src/handlers",
-      git: { repo: "backend-service", branch: "fix/terminal-resize" },
-    };
-    renderInTabs(CARD_ID_F0, vi.fn(), context);
+    renderInTabs(CARD_ID_F0);
 
-    const trigger = screen.getByText("src/handlers");
+    const meta = SESSION_META_FIXTURES[0];
+    const trigger = screen.getByText(meta.repo.name);
     await user.hover(trigger);
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("/home/user/work/backend-service/src/handlers");
+    expect(tooltip).toHaveTextContent(`${meta.repo.owner}/${meta.repo.name}`);
   });
 
-  it("7. tooltip on path-tail shows the full cwd when git is null", async () => {
+  it("7. tooltip on working-directory tail shows the full path", async () => {
     const user = userEvent.setup();
-    const context: SessionContext = {
-      cwd: "/home/user/work/backend-service/src/handlers",
-      git: null,
-    };
-    renderInTabs(CARD_ID_F1, vi.fn(), context);
+    // Use fixture 1: full path "/home/user/work/backend-service/src/handlers"
+    // visible tail: "src/handlers"
+    renderInTabs(CARD_ID_F1);
 
+    // The visible tail differs from the full path — hover the tail text
     const trigger = screen.getByText("src/handlers");
     await user.hover(trigger);
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("/home/user/work/backend-service/src/handlers");
+    expect(tooltip).toHaveTextContent(SESSION_META_FIXTURES[1].workingDirectory);
   });
 
   it("8. working-directory visible text is last 1-2 segments", () => {
-    const context: SessionContext = {
-      cwd: "/home/user/work/backend-service/src/handlers",
-      git: null,
-    };
-    renderInTabs(CARD_ID_F1, vi.fn(), context);
+    // Fixture 1: "/home/user/work/backend-service/src/handlers" → "src/handlers"
+    renderInTabs(CARD_ID_F1);
     expect(screen.getByText("src/handlers")).toBeInTheDocument();
-    expect(screen.queryByText("/home/user/work/backend-service/src/handlers")).toBeNull();
+    expect(screen.queryByText(SESSION_META_FIXTURES[1].workingDirectory)).toBeNull();
   });
 
   it("9a. PR badge shows 'PR —' when prNumber is undefined", () => {
@@ -190,55 +180,48 @@ describe("SessionCard", () => {
     expect(thirdBadge.textContent).toContain("—");
   });
 
-  it("12. row-2 shows repo, branch, and path-tail when git is present", () => {
-    const context: SessionContext = {
-      cwd: "/home/user/work/backend-service/src/handlers",
-      git: { repo: "backend-service", branch: "fix/resize" },
-    };
-    renderInTabs(CARD_ID_F0, vi.fn(), context);
-
-    expect(screen.getByText("backend-service")).toBeInTheDocument();
-    expect(screen.getByText("fix/resize")).toBeInTheDocument();
-    expect(screen.getByText("src/handlers")).toBeInTheDocument();
-  });
-
-  it("13. row-2 shows only path-tail when git is null (no repo or branch rendered)", () => {
-    // Use CARD_ID_F1 (fixture 1, repo: "backend-service") with a cwd whose
-    // last two segments do not collide with the repo name ("backend-service"),
-    // to avoid false-negative matches.
-    const meta = getMockSessionMeta(CARD_ID_F1);
-    const context: SessionContext = {
-      cwd: "/home/user/work/other-project/src",
-      git: null,
-    };
-    renderInTabs(CARD_ID_F1, vi.fn(), context);
-
-    expect(screen.getByText("other-project/src")).toBeInTheDocument();
-    // Repo name must not appear.
-    expect(screen.queryByText(meta.repo.name)).toBeNull();
-  });
-
-  it("14. row-2 shows … placeholder when cwd is null and git is null", () => {
-    renderInTabs(CARD_ID_F0, vi.fn(), { cwd: null, git: null });
-    expect(screen.getByText("…")).toBeInTheDocument();
-  });
-
-  it("15. row-2 shows repo : branch • … when cwd is null but git is present", () => {
-    const context: SessionContext = {
-      cwd: null,
-      git: { repo: "my-repo", branch: "main" },
-    };
-    renderInTabs(CARD_ID_F0, vi.fn(), context);
-
-    expect(screen.getByText("my-repo")).toBeInTheDocument();
-    expect(screen.getByText("main")).toBeInTheDocument();
-    expect(screen.getByText("…")).toBeInTheDocument();
-  });
-
   it("mock module is deterministic: same cardId returns deeply equal objects", () => {
     const id = "test-determinism-check";
     const a = getMockSessionMeta(id);
     const b = getMockSessionMeta(id);
     expect(a).toEqual(b);
+  });
+
+  // ── sessionMeta prop tests ────────────────────────────────────────────────
+
+  it("fallback: when sessionMeta prop is omitted, renders slug/repo/branch from mock fixture", () => {
+    renderInTabs(CARD_ID_F0);
+    const fixture = SESSION_META_FIXTURES[0];
+    expect(screen.getByText(fixture.slug)).toBeInTheDocument();
+    expect(screen.getByText(fixture.repo.name)).toBeInTheDocument();
+    expect(screen.getByText(fixture.branch)).toBeInTheDocument();
+  });
+
+  it("live: when sessionMeta prop is provided, renders slug/repo/branch from prop (not mock)", () => {
+    const liveMeta = {
+      sessionTs: "20260425-120000",
+      slug: "live-session",
+      workingDirectory: "/live/path/to/project",
+      branch: "feat/live-branch",
+      repo: { owner: "live-owner", name: "live-repo" },
+      prNumber: 99,
+      issueNumber: 7,
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionMeta={liveMeta} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+
+    // Live metadata must be shown.
+    expect(screen.getByText("live-session")).toBeInTheDocument();
+    expect(screen.getByText("live-repo")).toBeInTheDocument();
+    expect(screen.getByText("feat/live-branch")).toBeInTheDocument();
+
+    // Mock fixture data must NOT appear.
+    const fixture = SESSION_META_FIXTURES[0];
+    expect(screen.queryByText(fixture.slug)).toBeNull();
   });
 });

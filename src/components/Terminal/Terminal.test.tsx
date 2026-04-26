@@ -7,7 +7,7 @@
 const onDataDisposeSpy = vi.fn();
 const onDataSpy = vi.fn().mockReturnValue({ dispose: onDataDisposeSpy });
 
-// OSC handler spies — module-scoped so tests can extract registered handlers.
+// OSC handler spies — stable across mount/cleanup boundary.
 const oscHandlerDisposeSpy = vi.fn();
 const registerOscHandlerSpy = vi.fn().mockReturnValue({ dispose: oscHandlerDisposeSpy });
 
@@ -503,92 +503,105 @@ describe("Terminal", () => {
     expect(termInstance.writeln).toHaveBeenCalledWith(expect.stringContaining("write failed"));
   });
 
-  // ── OSC handler registration ──────────────────────────────────────────────
+  // ── OSC 6800 handler ─────────────────────────────────────────────────────
 
-  it("registers OSC 7 and OSC 7337 handlers on mount", () => {
-    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
-    const oscCodes = registerOscHandlerSpy.mock.calls.map((c: unknown[]) => c[0]);
-    expect(oscCodes).toContain(7);
-    expect(oscCodes).toContain(7337);
+  it("calls term.parser.registerOscHandler with 6800 and a function on mount", () => {
+    renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionMeta={vi.fn()} />,
+    );
+    expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
   });
 
-  it("calls onContextChange with parsed CWD when OSC 7 fires", () => {
-    const onContextChange = vi.fn();
+  it("OSC handler invoked with valid payload calls onSessionMeta once with parsed SessionMeta", () => {
+    const onSessionMeta = vi.fn();
     renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onContextChange={onContextChange}
-      />,
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionMeta={onSessionMeta} />,
     );
 
-    // Extract the OSC 7 handler by finding the call with first arg === 7.
-    const osc7Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7);
-    expect(osc7Call).toBeDefined();
-    const osc7Handler = osc7Call![1] as (data: string) => boolean | Promise<boolean>;
+    // Extract the registered OSC handler callback.
+    const oscCallback = registerOscHandlerSpy.mock.calls[
+      registerOscHandlerSpy.mock.calls.length - 1
+    ][1] as (data: string) => boolean;
 
-    osc7Handler("file://localhost/Users/me/projects/foo");
+    const validPayload = JSON.stringify({
+      SESSION_TS: "20260425-120000",
+      SESSION_SLUG: "smoke-test",
+      WORKING_DIRECTORY: "/tmp/smoke",
+      BRANCH: "main",
+      REPO: "acme/widgets",
+    });
 
-    expect(onContextChange).toHaveBeenCalledWith({ cwd: "/Users/me/projects/foo", git: null });
-  });
+    // Invoke the handler synchronously — queueMicrotask defers the dispatch.
+    const result = oscCallback(validPayload);
+    // Handler must return true (consume the sequence).
+    expect(result).toBe(true);
 
-  it("calls onContextChange with parsed git context when OSC 7337 fires (non-empty payload)", () => {
-    const onContextChange = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onContextChange={onContextChange}
-      />,
-    );
+    // Assert deferral: onSessionMeta must NOT be called synchronously
+    expect(onSessionMeta).not.toHaveBeenCalled();
 
-    // Fire OSC 7 first to establish a CWD (lastCwd).
-    const osc7Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7);
-    const osc7Handler = osc7Call![1] as (data: string) => boolean | Promise<boolean>;
-    osc7Handler("file://localhost/Users/me/projects/foo");
-
-    // Extract and fire the OSC 7337 handler.
-    const osc7337Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7337);
-    expect(osc7337Call).toBeDefined();
-    const osc7337Handler = osc7337Call![1] as (data: string) => boolean | Promise<boolean>;
-
-    osc7Handler("file://localhost/Users/me/projects/foo");
-    osc7337Handler("my-repo\tmain");
-
-    expect(onContextChange).toHaveBeenLastCalledWith({
-      cwd: "/Users/me/projects/foo",
-      git: { repo: "my-repo", branch: "main" },
+    // onSessionMeta is called via queueMicrotask — wait for the microtask queue.
+    return new Promise<void>((resolve) => {
+      queueMicrotask(() => {
+        expect(onSessionMeta).toHaveBeenCalledTimes(1);
+        expect(onSessionMeta).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionTs: "20260425-120000",
+            slug: "smoke-test",
+            branch: "main",
+            repo: { owner: "acme", name: "widgets" },
+          }),
+        );
+        resolve();
+      });
     });
   });
 
-  it("calls onContextChange with git: null when OSC 7337 fires with empty payload", () => {
-    const onContextChange = vi.fn();
+  it("OSC handler invoked with malformed JSON does not call onSessionMeta", () => {
+    const onSessionMeta = vi.fn();
     renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onContextChange={onContextChange}
-      />,
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionMeta={onSessionMeta} />,
     );
 
-    // First set a non-null git context.
-    const osc7337Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7337);
-    const osc7337Handler = osc7337Call![1] as (data: string) => boolean | Promise<boolean>;
-    osc7337Handler("my-repo\tmain");
+    const oscCallback = registerOscHandlerSpy.mock.calls[
+      registerOscHandlerSpy.mock.calls.length - 1
+    ][1] as (data: string) => boolean;
 
-    // Now fire with empty payload — git should become null.
-    osc7337Handler("");
+    const result = oscCallback("{not json");
+    expect(result).toBe(true);
 
-    expect(onContextChange).toHaveBeenLastCalledWith({ cwd: null, git: null });
+    return new Promise<void>((resolve) => {
+      queueMicrotask(() => {
+        expect(onSessionMeta).not.toHaveBeenCalled();
+        resolve();
+      });
+    });
   });
 
-  it("OSC handlers are disposed on unmount", () => {
-    const { unmount } = renderWithProviders(
-      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+  it("OSC handler returns true", () => {
+    renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionMeta={vi.fn()} />,
     );
+
+    const oscCallback = registerOscHandlerSpy.mock.calls[
+      registerOscHandlerSpy.mock.calls.length - 1
+    ][1] as (data: string) => boolean;
+
+    expect(oscCallback("anything")).toBe(true);
+  });
+
+  it("disposes OSC handler on unmount", async () => {
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionMeta={vi.fn()} />,
+    );
+
+    // Wait for async setup to complete.
+    await vi.waitFor(() => {
+      expect(onDataSpy).toHaveBeenCalled();
+    });
 
     unmount();
 
-    // Each registered handler returns { dispose: oscHandlerDisposeSpy }; both
-    // should be disposed once (one for OSC 7, one for OSC 7337).
-    expect(oscHandlerDisposeSpy).toHaveBeenCalledTimes(2);
+    expect(oscHandlerDisposeSpy).toHaveBeenCalledTimes(1);
   });
 
   it("does not surface spurious errors on cross-mount remount with the same sessionId (StrictMode race)", async () => {

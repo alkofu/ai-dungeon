@@ -1,16 +1,16 @@
 import { ActionIcon, Group, Tabs, Text, Title } from "@mantine/core";
 import type { Card } from "../../types/card";
-import type { SessionContext } from "../Terminal/Terminal";
+import type { SessionMeta } from "../../types/session";
 import { SessionCard } from "./SessionCard";
 
 interface NavBarProps {
   cards: Card[];
   onAddCard: () => void;
   onRemoveCard: (id: string) => void;
-  contexts: Record<string, SessionContext>;
+  sessionMeta: Record<string, SessionMeta>;
 }
 
-export function NavBar({ cards, onAddCard, onRemoveCard, contexts }: NavBarProps) {
+export function NavBar({ cards, onAddCard, onRemoveCard, sessionMeta }: NavBarProps) {
   return (
     <>
       <Group justify="space-between">
@@ -52,7 +52,7 @@ export function NavBar({ cards, onAddCard, onRemoveCard, contexts }: NavBarProps
               <SessionCard
                 cardId={card.id}
                 onRemove={onRemoveCard}
-                context={contexts[card.id] ?? { cwd: null, git: null }}
+                sessionMeta={sessionMeta[card.id]}
               />
             </Tabs.Tab>
           ))}

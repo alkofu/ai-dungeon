@@ -1,13 +1,13 @@
 import type React from "react";
 import { ActionIcon, Badge, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconCircleDot, IconGitPullRequest } from "@tabler/icons-react";
-import type { SessionContext } from "../Terminal/Terminal";
+import type { SessionMeta } from "../../types/session";
 import { getMockSessionMeta } from "./sessionMeta.mock";
 
 interface SessionCardProps {
   cardId: string;
   onRemove: (id: string) => void;
-  context: SessionContext;
+  sessionMeta?: SessionMeta;
 }
 
 /**
@@ -23,8 +23,8 @@ function lastSegments(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-export function SessionCard({ cardId, onRemove, context }: SessionCardProps) {
-  const meta = getMockSessionMeta(cardId);
+export function SessionCard({ cardId, onRemove, sessionMeta }: SessionCardProps) {
+  const meta = sessionMeta ?? getMockSessionMeta(cardId);
 
   return (
     <Stack gap="xs">
@@ -60,41 +60,28 @@ export function SessionCard({ cardId, onRemove, context }: SessionCardProps) {
         </ActionIcon>
       </Group>
 
-      {/* Row 2: repo : branch • path-tail  (git present)
-               OR  path-tail right-aligned   (no git)
-          Note: justify="flex-end" for the git-null case is a visual concern.
-          Mantine's Group renders inline styles in jsdom but computed layout is
-          not meaningful without a real browser — automated assertion for right-
-          alignment is omitted; manual verification covers this (Step 6). */}
-      {context.git !== null ? (
-        <Group gap="xs" wrap="nowrap">
+      {/* Row 2: repo : branch • path-tail */}
+      <Group gap="xs" wrap="nowrap">
+        <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
           <Text size="xs" c="dimmed" truncate>
-            {context.git.repo}
+            {meta.repo.name}
           </Text>
-          <Text size="xs" c="dimmed">
-            :
-          </Text>
+        </Tooltip>
+        <Text size="xs" c="dimmed">
+          :
+        </Text>
+        <Text size="xs" c="dimmed" truncate>
+          {meta.branch}
+        </Text>
+        <Text size="xs" c="dimmed">
+          •
+        </Text>
+        <Tooltip label={meta.workingDirectory} withinPortal={false}>
           <Text size="xs" c="dimmed" truncate>
-            {context.git.branch}
+            {lastSegments(meta.workingDirectory)}
           </Text>
-          <Text size="xs" c="dimmed">
-            •
-          </Text>
-          <Tooltip label={context.cwd ?? ""} withinPortal={false}>
-            <Text size="xs" c="dimmed" truncate>
-              {context.cwd !== null ? lastSegments(context.cwd) : "…"}
-            </Text>
-          </Tooltip>
-        </Group>
-      ) : (
-        <Group justify="flex-end" wrap="nowrap">
-          <Tooltip label={context.cwd ?? ""} withinPortal={false}>
-            <Text size="xs" c="dimmed" truncate>
-              {context.cwd !== null ? lastSegments(context.cwd) : "…"}
-            </Text>
-          </Tooltip>
-        </Group>
-      )}
+        </Tooltip>
+      </Group>
 
       {/* Row 3: PR badge, Issue badge, placeholder badge */}
       <Group gap="xs" wrap="nowrap">

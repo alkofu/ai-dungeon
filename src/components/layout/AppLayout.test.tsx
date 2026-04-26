@@ -118,8 +118,8 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId={null}
         onActiveIdChange={vi.fn()}
-        contexts={{}}
-        onContextChange={vi.fn()}
+        sessionMeta={{}}
+        onSessionMeta={vi.fn()}
       />,
     );
 

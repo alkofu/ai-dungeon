@@ -3,17 +3,18 @@ import userEvent from "@testing-library/user-event";
 import { act } from "@testing-library/react";
 import { renderWithProviders } from "./test-utils/render";
 import { App, appReducer } from "./App";
-import type { AppState, SessionContext } from "./App";
+import type { AppState } from "./App";
+import type { SessionMeta } from "./types/session";
 import { invoke } from "@tauri-apps/api/core";
 
-// Capture the latest onContextChange prop passed to the Terminal mock so
+// Capture the latest onSessionMeta prop passed to the Terminal mock so
 // integration tests can fire OSC context changes through the full plumbing.
-let capturedOnContextChange: ((ctx: SessionContext) => void) | undefined;
+let capturedOnSessionMeta: ((meta: SessionMeta) => void) | undefined;
 
 vi.mock("./components/Terminal/Terminal", () => ({
   Terminal: vi.fn(
-    (props: { sessionId?: string; onContextChange?: (ctx: SessionContext) => void }) => {
-      capturedOnContextChange = props.onContextChange;
+    (props: { sessionId?: string; onSessionMeta?: (meta: SessionMeta) => void }) => {
+      capturedOnSessionMeta = props.onSessionMeta;
       // Render the sentinel div so existing tests that query terminal-root continue to work.
       return <div data-testid="terminal-root" />;
     },
@@ -58,15 +59,15 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 type AnyMock = ReturnType<typeof vi.fn>;
 
-// Integration note: the OSC 7 / OSC 7337 → SessionCard row-2 propagation chain is
-// covered by appReducer unit tests (below) and SessionCard.test.tsx tests 12-15.
+// Integration note: the OSC 6800 → SessionCard row-2 propagation chain is
+// covered by appReducer unit tests (below) and SessionCard.test.tsx tests.
 // No component-level integration test is added here because the xterm OSC handlers
 // never fire in jsdom (xterm is fully mocked), making a component-level test of the
 // full chain impractical without significant test-infrastructure investment.
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedOnContextChange = undefined;
+    capturedOnSessionMeta = undefined;
     (invoke as unknown as AnyMock).mockResolvedValue(undefined);
 
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
@@ -269,88 +270,112 @@ describe("App", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("SessionCard row-2 updates when the Terminal's onContextChange callback fires", async () => {
+  it("SessionCard row-2 updates when the Terminal's onSessionMeta callback fires", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
 
-    // Fire the onContextChange callback captured from the Terminal mock.
+    // Fire the onSessionMeta callback captured from the Terminal mock.
     await act(async () => {
-      capturedOnContextChange?.({
-        cwd: "/home/user/project/backend-service",
-        git: { repo: "backend-service", branch: "main" },
+      capturedOnSessionMeta?.({
+        sessionTs: "20260425-120000",
+        slug: "backend-service",
+        workingDirectory: "/home/user/project/backend-service",
+        branch: "main",
+        repo: { owner: "acme", name: "widgets" },
       });
     });
 
-    // SessionCard row-2 should now show the repo name and branch.
+    // SessionCard row-2 should now show the slug.
     expect(screen.getByText("backend-service")).toBeInTheDocument();
-    expect(screen.getByText("main")).toBeInTheDocument();
   });
 });
 
 describe("appReducer", () => {
   it("activate ignores null while cards exist", () => {
     const card = { id: "test-uuid-1" };
-    const state: AppState = { cards: [card], activeId: "test-uuid-1", contexts: {} };
+    const state: AppState = { cards: [card], activeId: "test-uuid-1", sessionMeta: {} };
     expect(appReducer(state, { type: "activate", id: null })).toBe(state); // referential equality
   });
 
   it("activate accepts null when no cards exist", () => {
-    const state: AppState = { cards: [], activeId: null, contexts: {} };
+    const state: AppState = { cards: [], activeId: null, sessionMeta: {} };
     const result = appReducer(state, { type: "activate", id: null });
-    expect(result).toEqual({ cards: [], activeId: null, contexts: {} });
+    expect(result).toEqual({ cards: [], activeId: null, sessionMeta: {} });
   });
 
-  it("add seeds an empty context for the new card", () => {
-    const state: AppState = { cards: [], activeId: null, contexts: {} };
-    const result = appReducer(state, { type: "add" });
-    const newId = result.cards[0]!.id;
-    expect(result.contexts[newId]).toEqual({ cwd: null, git: null });
-  });
-
-  it("remove deletes the context entry for the removed card", () => {
-    const cardId = "test-uuid-1";
-    const state: AppState = {
-      cards: [{ id: cardId }],
-      activeId: cardId,
-      contexts: { [cardId]: { cwd: "/home/user", git: null } },
+  it("setSessionMeta stores meta keyed by card id", () => {
+    const card = { id: "card-1" };
+    const state: AppState = { cards: [card], activeId: "card-1", sessionMeta: {} };
+    const meta = {
+      sessionTs: "20260425-120000",
+      slug: "test",
+      workingDirectory: "/tmp",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
     };
-    const result = appReducer(state, { type: "remove", id: cardId });
-    expect(result.contexts[cardId]).toBeUndefined();
+    const result = appReducer(state, { type: "setSessionMeta", id: "card-1", meta });
+    expect(result.sessionMeta["card-1"]).toEqual(meta);
   });
 
-  it("setContext merges the ctx into the matching session", () => {
-    const cardId = "test-uuid-1";
-    const otherId = "test-uuid-2";
-    const state: AppState = {
-      cards: [{ id: cardId }, { id: otherId }],
-      activeId: cardId,
-      contexts: {
-        [cardId]: { cwd: null, git: null },
-        [otherId]: { cwd: "/other", git: null },
-      },
+  it("setSessionMeta: overwrites existing metadata when same card emits OSC again", () => {
+    const firstMeta: SessionMeta = {
+      sessionTs: "20260401-120000",
+      slug: "first-slug",
+      workingDirectory: "/tmp",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
     };
-    const newCtx = { cwd: "/foo", git: { repo: "my-repo", branch: "main" } };
-    const result = appReducer(state, { type: "setContext", id: cardId, ctx: newCtx });
-    expect(result.contexts[cardId]).toEqual(newCtx);
-    // Other sessions unaffected.
-    expect(result.contexts[otherId]).toEqual({ cwd: "/other", git: null });
-  });
-
-  it("setContext for a removed id is a no-op (returns same state reference)", () => {
-    const cardId = "test-uuid-1";
-    const removedId = "test-uuid-removed";
-    const state: AppState = {
-      cards: [{ id: cardId }],
-      activeId: cardId,
-      contexts: { [cardId]: { cwd: null, git: null } },
+    const secondMeta: SessionMeta = {
+      sessionTs: "20260401-130000",
+      slug: "second-slug",
+      workingDirectory: "/tmp",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
     };
-    const result = appReducer(state, {
-      type: "setContext",
-      id: removedId,
-      ctx: { cwd: "/foo", git: null },
+    const stateAfterFirst = appReducer(
+      { cards: [{ id: "card-1" }], activeId: null, sessionMeta: {} },
+      { type: "setSessionMeta", id: "card-1", meta: firstMeta },
+    );
+    const stateAfterSecond = appReducer(stateAfterFirst, {
+      type: "setSessionMeta",
+      id: "card-1",
+      meta: secondMeta,
     });
+    expect(stateAfterSecond.sessionMeta["card-1"]).toEqual(secondMeta);
+    // second value fully replaces first — no field bleeding
+    expect(stateAfterSecond.sessionMeta["card-1"].sessionTs).toBe("20260401-130000");
+  });
+
+  it("setSessionMeta is a no-op if card id is not in state.cards", () => {
+    const state: AppState = { cards: [], activeId: null, sessionMeta: {} };
+    const meta = {
+      sessionTs: "20260425-120000",
+      slug: "test",
+      workingDirectory: "/tmp",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
+    };
+    const result = appReducer(state, { type: "setSessionMeta", id: "ghost-id", meta });
     expect(result).toBe(state); // referential equality — no-op
+  });
+
+  it("remove cleans up sessionMeta for the removed card", () => {
+    const card = { id: "card-1" };
+    const meta = {
+      sessionTs: "20260425-120000",
+      slug: "test",
+      workingDirectory: "/tmp",
+      branch: "main",
+      repo: { owner: "acme", name: "widgets" },
+    };
+    const state: AppState = {
+      cards: [card],
+      activeId: "card-1",
+      sessionMeta: { "card-1": meta },
+    };
+    const result = appReducer(state, { type: "remove", id: "card-1" });
+    expect(result.sessionMeta).not.toHaveProperty("card-1");
   });
 });

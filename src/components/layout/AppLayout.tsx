@@ -1,7 +1,7 @@
 import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import type { Card } from "../../types/card";
-import type { SessionContext } from "../Terminal/Terminal";
+import type { SessionMeta } from "../../types/session";
 import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
 
@@ -14,8 +14,8 @@ interface AppLayoutProps {
   onRemoveCard: (id: string) => void;
   activeId: string | null;
   onActiveIdChange: (value: string | null) => void;
-  contexts: Record<string, SessionContext>;
-  onContextChange: (id: string, ctx: SessionContext) => void;
+  sessionMeta: Record<string, SessionMeta>;
+  onSessionMeta: (id: string, meta: SessionMeta) => void;
 }
 
 export function AppLayout({
@@ -24,8 +24,8 @@ export function AppLayout({
   onRemoveCard,
   activeId,
   onActiveIdChange,
-  contexts,
-  onContextChange,
+  sessionMeta,
+  onSessionMeta,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
 
@@ -85,7 +85,7 @@ export function AppLayout({
             cards={cards}
             onAddCard={onAddCard}
             onRemoveCard={onRemoveCard}
-            contexts={contexts}
+            sessionMeta={sessionMeta}
           />
         </AppShell.Navbar>
 
@@ -104,7 +104,7 @@ export function AppLayout({
               <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
                 <Terminal
                   sessionId={card.id}
-                  onContextChange={(ctx) => onContextChange(card.id, ctx)}
+                  onSessionMeta={(meta) => onSessionMeta(card.id, meta)}
                 />
               </Tabs.Panel>
             ))

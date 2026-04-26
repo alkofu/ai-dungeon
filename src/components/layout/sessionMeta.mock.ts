@@ -2,6 +2,7 @@ import type { SessionMeta } from "../../types/session";
 
 export const SESSION_META_FIXTURES: SessionMeta[] = [
   {
+    sessionTs: "20260425-120000",
     slug: "refactor-auth-flow",
     workingDirectory: "~/projects/ai-dungeon",
     branch: "feat/session-card",
@@ -10,6 +11,7 @@ export const SESSION_META_FIXTURES: SessionMeta[] = [
     repo: { owner: "acme-corp", name: "ai-dungeon" },
   },
   {
+    sessionTs: "20260424-093015",
     slug: "fix-terminal-resize",
     workingDirectory: "/home/user/work/backend-service/src/handlers",
     branch: "fix/terminal-resize",
@@ -17,6 +19,7 @@ export const SESSION_META_FIXTURES: SessionMeta[] = [
     repo: { owner: "acme-corp", name: "backend-service" },
   },
   {
+    sessionTs: "20260423-141200",
     slug: "add-issue-tracker",
     workingDirectory: "/Users/alex/code/frontend",
     branch: "feat/issue-tracker",
@@ -24,6 +27,7 @@ export const SESSION_META_FIXTURES: SessionMeta[] = [
     repo: { owner: "open-source-org", name: "frontend" },
   },
   {
+    sessionTs: "20260422-080530",
     slug: "chore-update-deps",
     workingDirectory: "~/personal/side-project",
     branch: "chore/update-deps",

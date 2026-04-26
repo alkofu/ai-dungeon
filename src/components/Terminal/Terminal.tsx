@@ -3,6 +3,8 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { parseSessionMetaPayload } from "../../types/sessionPayload";
+import type { SessionMeta } from "../../types/session";
 
 export interface SessionContext {
   cwd: string | null;
@@ -14,9 +16,11 @@ interface TerminalProps {
   // same sessionId across re-renders means the same shell; a different sessionId
   // triggers a full unmount/re-spawn via the useEffect dependency array.
   sessionId: string;
-  // Called whenever an OSC 7 or OSC 7337 sequence arrives with updated context.
-  // Optional so existing callers that omit it continue to type-check.
-  onContextChange?: (ctx: SessionContext) => void;
+  // Called whenever an OSC 6800 payload is received and successfully parsed.
+  // Captured via a ref so the OSC handler always uses the latest version without
+  // needing to be in the useEffect dependency array (which would restart the PTY
+  // session on every re-render of the parent).
+  onSessionMeta?: (meta: SessionMeta) => void;
 }
 
 // ── Per-sid spawn-chain (Ruinor F-1 resolution) ───────────────────────────────
@@ -52,13 +56,14 @@ export function _clearSpawnChainForTesting(): void {
   spawnChain.clear();
 }
 
-export function Terminal({ sessionId, onContextChange }: TerminalProps) {
+export function Terminal({ sessionId, onSessionMeta }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Stable ref so OSC handlers always call the latest callback without needing
-  // it in the useEffect dependency array (which would re-mount the terminal on
-  // every render where the parent re-creates the callback reference).
-  const onContextChangeRef = useRef(onContextChange);
-  onContextChangeRef.current = onContextChange;
+  // Keep a ref to the latest onSessionMeta callback so the OSC handler always
+  // calls the current version without adding it to the useEffect dependency
+  // array (which would cause the effect — and therefore the PTY session — to
+  // restart every time the parent re-renders).
+  const onSessionMetaRef = useRef(onSessionMeta);
+  onSessionMetaRef.current = onSessionMeta;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -77,6 +82,9 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
     // Collect the onData disposable for cleanup.
     let onDataDisposable: { dispose: () => void } | undefined;
 
+    // Collect the OSC 6800 handler disposable for cleanup.
+    let oscDisposable: { dispose: () => void } | undefined;
+
     // Buffer for keystrokes that arrive before the PTY is ready. Each entry is
     // a discrete xterm onData string and is encoded + sent independently to
     // preserve per-keystroke handling semantics.
@@ -88,46 +96,20 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
 
-    // ── OSC 7 / OSC 7337 context handlers ────────────────────────────────────
-    // Closure-scoped state threads both fields through each handler.
-    // Per-effect-instance: resets on sessionId change (correct — new shell session)
-    // but overwrites parent state if the Terminal remounts without a sessionId change.
-    let lastCwd: string | null = null;
-    let lastGit: { repo: string; branch: string } | null = null;
-
-    // OSC 7: file://hostname/path — update CWD.
-    // Uses new URL().pathname to correctly handle both file://hostname/path and
-    // file:///path (empty host). decodeURIComponent handles percent-encoded
-    // characters (e.g. spaces in directory names); the inner try/catch falls back
-    // to the raw pathname if the encoding is malformed.
-    const osc7Handler = term.parser.registerOscHandler(7, (data): boolean | Promise<boolean> => {
-      try {
-        try {
-          lastCwd = decodeURIComponent(new URL(data).pathname);
-        } catch {
-          lastCwd = new URL(data).pathname; // fallback: use raw pathname if decode fails
-        }
-      } catch {
-        // Malformed URL — leave lastCwd unchanged.
+    // ── OSC 6800 handler ──────────────────────────────────────────────────────
+    // Intercepts OSC 6800 sequences emitted by the TPK toolkit to surface
+    // session metadata in the per-tab UI. The handler returns true so xterm.js
+    // does not chain the sequence to its default handler (which would print or
+    // ignore it). The dispatch is wrapped in queueMicrotask to guarantee it
+    // lands outside the current synchronous stack (term.write() fires OSC
+    // handlers synchronously, which would violate React's render rules).
+    oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
+      const meta = parseSessionMetaPayload(data);
+      if (meta) {
+        queueMicrotask(() => onSessionMetaRef.current?.(meta));
       }
-      onContextChangeRef.current?.({ cwd: lastCwd, git: lastGit });
       return true;
     });
-
-    // OSC 7337: custom git context — empty payload clears, "repo\tbranch" sets.
-    const osc7337Handler = term.parser.registerOscHandler(
-      7337,
-      (data): boolean | Promise<boolean> => {
-        if (data === "") {
-          lastGit = null;
-        } else {
-          const [repo, branch] = data.split("\t");
-          lastGit = { repo, branch };
-        }
-        onContextChangeRef.current?.({ cwd: lastCwd, git: lastGit });
-        return true;
-      },
-    );
 
     // ── encodeBase64 helper ───────────────────────────────────────────────────
     // Encodes a xterm data string to UTF-8 bytes, then base64. Returns the
@@ -304,9 +286,8 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
       // this unmounted instance.
       pendingWrites.length = 0;
       observer.disconnect();
+      oscDisposable?.dispose();
       onDataDisposable?.dispose();
-      osc7Handler.dispose();
-      osc7337Handler.dispose();
       unlistenOutput?.();
       unlistenExit?.();
       // Defer pty_kill until the in-flight spawnPromise has settled.
