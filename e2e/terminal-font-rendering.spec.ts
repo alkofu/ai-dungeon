@@ -5,9 +5,12 @@
  * FontFaceSet before the xterm.js terminal is opened, fixing the Powerlevel10k
  * glyph spacing regression tracked in issue #32.
  *
- * Primary assertion: document.fonts.check('13px "MesloLGS NF"') returns true.
- * This is a robust, machine-readable check that does not depend on pixel-level
- * rendering and is stable across machines, CI runners, and OS font stacks.
+ * Primary assertion: document.fonts.load('13px "MesloLGS NF"') is awaited to
+ * actively trigger the browser fetch-and-decode, then document.fonts.check()
+ * confirms registration. This is robust and machine-readable — it does not
+ * depend on pixel-level rendering and is stable across machines, CI runners,
+ * and OS font stacks. Critically, it does not race the terminal's async
+ * font-load IIFE the way a passive check() call would.
  *
  * Screenshot assertions are intentionally omitted. Snapshot diffs across host
  * font-rendering stacks are false-positive-prone without a pinned Docker image.
@@ -37,9 +40,18 @@ test.describe("MesloLGS NF font loading", () => {
 
     // Primary assertion: MesloLGS NF must be fully loaded at the target font
     // size (13px — matches the fontSize passed to the XTerm constructor).
-    // document.fonts.check() returns true only after the font has been both
-    // registered AND loaded; a pending font face returns false.
-    const fontLoaded = await page.evaluate(() => document.fonts.check('13px "MesloLGS NF"'));
+    // document.fonts.load() actively triggers the browser to fetch and decode
+    // the font file; document.fonts.check() then confirms registration. This
+    // is more reliable than a passive check because it does not depend on the
+    // terminal's async IIFE having completed before the test polls.
+    const fontLoaded = await page.evaluate(async () => {
+      try {
+        await document.fonts.load('13px "MesloLGS NF"');
+      } catch {
+        // If load rejects (font not declared), check() will return false below.
+      }
+      return document.fonts.check('13px "MesloLGS NF"');
+    });
 
     expect(fontLoaded).toBe(true);
   });

@@ -14,6 +14,8 @@ jobs:
   check:
     name: Lint, format, and test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -43,6 +45,8 @@ jobs:
   e2e:
     name: Playwright e2e
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # The webServer in playwright.config.ts runs `pnpm dev` (Vite frontend only —
     # no Tauri desktop binary is required). This makes the e2e suite runnable in a
     # standard GitHub Actions Linux runner without any native system dependencies
