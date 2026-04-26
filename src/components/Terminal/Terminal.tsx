@@ -106,6 +106,49 @@ export function Terminal({
     const term = new XTerm();
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+
+    // Allow the global tab-switching hotkeys to escape xterm.
+    // Returning false tells xterm "do not handle this event"; the event
+    // continues to propagate so the document-level useHotkeys listener
+    // registered in AppLayout (attached at document.documentElement) can
+    // act on it.
+    // The set covers the eleven combos in scope: mod+ArrowLeft,
+    // mod+ArrowRight, and mod+1..mod+9. mod+0 is intentionally NOT in
+    // this set (matches AppLayout's hotkey registrations).
+    //
+    // The `shiftKey || altKey` early-return is load-bearing: Mantine's
+    // parseHotkey for "mod+1" demands { shift: false, alt: false }, so
+    // useHotkeys does NOT fire for combos like mod+Shift+1 or
+    // mod+Alt+ArrowLeft. If we returned false for those here, the combo
+    // would be silently swallowed (xterm ignores it AND useHotkeys
+    // ignores it). Real-world impact: tmux/screen users routinely use
+    // Ctrl+Shift+1..9 for window selection inside the terminal — those
+    // must reach the shell. So we restrict interception to bare mod+key
+    // (no shift, no alt), which is exactly the eleven combos useHotkeys
+    // is registered for.
+    //
+    // DIGIT_KEYS is an explicit Set rather than a string-range comparison
+    // (event.key >= "1" && event.key <= "9"), which is technically correct
+    // but non-obvious. The set documents intent and matches the nine
+    // mod+1..mod+9 combos registered in AppLayout one-for-one.
+    const DIGIT_KEYS = new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return true;
+      // Only intercept bare mod+key — reject any extra modifiers so that
+      // mod+Shift+... and mod+Alt+... still reach xterm and the shell.
+      if (event.shiftKey || event.altKey) return true;
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        return false;
+      }
+      if (DIGIT_KEYS.has(event.key)) {
+        return false;
+      }
+      return true;
+    });
+
     term.open(containerRef.current);
 
     // ── OSC 6800 handler ──────────────────────────────────────────────────────

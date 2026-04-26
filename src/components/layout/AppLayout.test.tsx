@@ -12,6 +12,7 @@ vi.mock("@xterm/xterm", () => {
       dispose: _vi.fn(),
       onData: _vi.fn().mockReturnValue({ dispose: _vi.fn() }),
       parser: { registerOscHandler: _vi.fn().mockReturnValue({ dispose: _vi.fn() }) },
+      attachCustomKeyEventHandler: _vi.fn(),
     };
   }
   return { Terminal: vi.fn().mockImplementation(MockTerminal) };
@@ -41,6 +42,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import React from "react";
 import { act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test-utils/render";
 import { AppLayout } from "./AppLayout";
 import { invoke } from "@tauri-apps/api/core";
@@ -249,6 +251,145 @@ describe("AppLayout", () => {
       if (val instanceof Error) {
         expect(val.message).not.toContain("session already exists");
       }
+    }
+  });
+});
+
+// ── Keyboard navigation integration tests ─────────────────────────────────────
+
+describe("AppLayout — keyboard navigation", () => {
+  const threeCards = [{ id: "A" }, { id: "B" }, { id: "C" }];
+
+  function renderLayout(cards: { id: string }[], activeId: string | null) {
+    const onActiveIdChange = vi.fn();
+    const user = userEvent.setup();
+    const result = renderWithProviders(
+      <AppLayout
+        cards={cards}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        activeId={activeId}
+        onActiveIdChange={onActiveIdChange}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
+        onSessionContextPatch={vi.fn()}
+      />,
+    );
+    return { ...result, onActiveIdChange, user };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+  });
+
+  it("cycle next (mod+ArrowRight) from middle card activates next card", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "B");
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
+    });
+    expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).toHaveBeenCalledWith("C");
+  });
+
+  it("cycle previous (mod+ArrowLeft) from middle card activates previous card", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "B");
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowLeft}{/Meta}");
+    });
+    expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).toHaveBeenCalledWith("A");
+  });
+
+  it("cycle next wraps from last card to first card", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "C");
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
+    });
+    expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).toHaveBeenCalledWith("A");
+  });
+
+  it("cycle previous wraps from first card to last card", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "A");
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowLeft}{/Meta}");
+    });
+    expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).toHaveBeenCalledWith("C");
+  });
+
+  it("numeric jump mod+1 activates first card", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "B");
+    await act(async () => {
+      await user.keyboard("{Meta>}1{/Meta}");
+    });
+    expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).toHaveBeenCalledWith("A");
+  });
+
+  it("numeric jump mod+3 activates third card", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "A");
+    await act(async () => {
+      await user.keyboard("{Meta>}3{/Meta}");
+    });
+    expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).toHaveBeenCalledWith("C");
+  });
+
+  it("numeric jump beyond range is a no-op", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "A");
+    await act(async () => {
+      await user.keyboard("{Meta>}4{/Meta}");
+    });
+    expect(onActiveIdChange).not.toHaveBeenCalled();
+  });
+
+  it("cycle is a no-op with one card", async () => {
+    const { onActiveIdChange, user } = renderLayout([{ id: "A" }], "A");
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
+    });
+    expect(onActiveIdChange).not.toHaveBeenCalled();
+  });
+
+  it("cycle is a no-op with zero cards", async () => {
+    const { onActiveIdChange, user } = renderLayout([], null);
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
+    });
+    expect(onActiveIdChange).not.toHaveBeenCalled();
+  });
+
+  it("mod+0 is unhandled (regression guard)", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "A");
+    await act(async () => {
+      await user.keyboard("{Meta>}0{/Meta}");
+    });
+    expect(onActiveIdChange).not.toHaveBeenCalled();
+  });
+
+  it("hotkey fires while a textarea is focused (tagsToIgnore: [] override)", async () => {
+    const { onActiveIdChange, user } = renderLayout(threeCards, "B");
+
+    const textarea = document.createElement("textarea");
+    textarea.setAttribute("data-testid", "probe-textarea");
+    document.body.appendChild(textarea);
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+
+    try {
+      await act(async () => {
+        await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
+      });
+      expect(onActiveIdChange).toHaveBeenCalledTimes(1);
+      expect(onActiveIdChange).toHaveBeenCalledWith("C");
+    } finally {
+      document.body.removeChild(textarea);
     }
   });
 });

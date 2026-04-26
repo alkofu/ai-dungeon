@@ -92,6 +92,14 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 15. **No spurious errors on cards 2+** — Click `+` three times to create cards 2, 3, and 4. Inspect every terminal pane. No pane must display `[pty write failed: session not found: …]` or `[failed to start shell: session already exists]` on initial render. Type a command (e.g. `echo ok`) in each terminal and confirm it produces output.
 16. **No orphaned shells after rapid add/remove** — Rapidly add five cards, then remove all of them, then add five again. Run the ppid-filtered orphan check from step 7. The shell count must equal the number of currently-live cards exactly. Any excess indicates orphaned processes — treat as a regression and do not merge.
 
+### Keyboard tab navigation checks
+
+17. **Cycle with terminal focus** — Add three cards. Click into the third card's terminal (xterm textarea has focus). Press `Cmd+ArrowRight` (macOS) or `Ctrl+ArrowRight` (Windows/Linux). Confirm the active tab wraps to card 1. Press `Cmd+ArrowLeft` / `Ctrl+ArrowLeft`. Confirm the active tab returns to card 3.
+18. **Cycle with sidebar focus** — Click a sidebar card label so focus is in the navbar. Press `Cmd+ArrowRight` / `Ctrl+ArrowRight`. Confirm the active tab changes. The shortcut must work regardless of where focus is in the app.
+19. **Direct jump** — Add at least three cards. Press `Cmd+2` / `Ctrl+2`. Confirm the second card becomes active. Press `Cmd+3` / `Ctrl+3`. Confirm the third card becomes active.
+20. **Direct jump out of range** — With two cards active, press `Cmd+9` / `Ctrl+9`. Confirm the active tab does not change and no error occurs.
+21. **No WebView back-navigation** — Press `Cmd+ArrowLeft` / `Ctrl+ArrowLeft` with only one card open (cycling is a no-op). Confirm the WebView does not navigate back (no blank or prior-page flash).
+
 ## CI
 
 `pnpm lint`, `pnpm format:check`, and `pnpm test` run automatically on every pull request and push to `main` via the `check` job in `.github/workflows/test.yml`.

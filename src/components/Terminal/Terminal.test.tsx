@@ -15,6 +15,8 @@ let osc7337DisposeSpy: ReturnType<typeof vi.fn>;
 
 const registerOscHandlerSpy = vi.fn();
 
+const attachKeyHandlerSpy = vi.fn();
+
 vi.mock("@xterm/xterm", () => {
   const writeSpy = vi.fn();
   const writelnSpy = vi.fn();
@@ -30,6 +32,7 @@ vi.mock("@xterm/xterm", () => {
       dispose: disposeSpy,
       onData: onDataSpy,
       parser: { registerOscHandler: registerOscHandlerSpy },
+      attachCustomKeyEventHandler: attachKeyHandlerSpy,
     };
   }
   return { Terminal: vi.fn().mockImplementation(MockTerminal) };
@@ -1371,5 +1374,83 @@ describe("Terminal", () => {
     expect(cbB).toHaveBeenCalledWith({ workingDirectory: "/Users/me/second" });
     // cbA must NOT have been called again.
     expect(cbA).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Custom key event handler ───────────────────────────────────────────────────
+
+describe("custom key event handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    unlistenSpies.length = 0;
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+  });
+
+  function getHandler() {
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+    return attachKeyHandlerSpy.mock.calls[0][0] as (e: KeyboardEvent) => boolean;
+  }
+
+  it("returns false for mod+ArrowLeft (metaKey)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "ArrowLeft", metaKey: true }))).toBe(false);
+  });
+
+  it("returns false for mod+ArrowRight (metaKey)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "ArrowRight", metaKey: true }))).toBe(false);
+  });
+
+  it("returns false for mod+ArrowLeft (ctrlKey — Linux/Windows path)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "ArrowLeft", ctrlKey: true }))).toBe(false);
+  });
+
+  it("returns false for mod+1 (metaKey)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "1", metaKey: true }))).toBe(false);
+  });
+
+  it("returns false for mod+9 (metaKey)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "9", metaKey: true }))).toBe(false);
+  });
+
+  it("returns true for mod+0 (not in scope)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "0", metaKey: true }))).toBe(true);
+  });
+
+  it("returns true for unmodified ArrowLeft", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "ArrowLeft" }))).toBe(true);
+  });
+
+  it("returns true for alphabetic key with modifier", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "a", metaKey: true }))).toBe(true);
+  });
+
+  it("returns true for keyup event (only keydown is intercepted)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keyup", { key: "ArrowLeft", metaKey: true }))).toBe(true);
+  });
+
+  it("returns true for mod+Shift+1 (shift-prefixed combo passes through — tmux/screen regression guard)", () => {
+    const handler = getHandler();
+    expect(handler(new KeyboardEvent("keydown", { key: "1", metaKey: true, shiftKey: true }))).toBe(
+      true,
+    );
+  });
+
+  it("returns true for mod+Alt+ArrowLeft (alt-prefixed combo passes through — F-1 regression guard)", () => {
+    const handler = getHandler();
+    expect(
+      handler(new KeyboardEvent("keydown", { key: "ArrowLeft", metaKey: true, altKey: true })),
+    ).toBe(true);
   });
 });
