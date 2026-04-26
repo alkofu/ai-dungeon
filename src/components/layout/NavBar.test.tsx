@@ -69,9 +69,7 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderNavBar(
-      <NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} />,
-    );
+    renderNavBar(<NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} />);
 
     const closeButton = screen.getByRole("button", { name: "Remove card a" });
     closeButton.focus();
@@ -85,9 +83,7 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderNavBar(
-      <NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} />,
-    );
+    renderNavBar(<NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} />);
 
     const closeButton = screen.getByRole("button", { name: "Remove card a" });
     closeButton.focus();

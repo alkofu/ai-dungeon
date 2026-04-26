@@ -4,7 +4,7 @@ import type { Card } from "./types/card";
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
-interface AppState {
+export interface AppState {
   cards: Card[];
   activeId: string | null;
 }
