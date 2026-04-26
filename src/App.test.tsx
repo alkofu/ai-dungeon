@@ -1,9 +1,24 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { act } from "@testing-library/react";
 import { renderWithProviders } from "./test-utils/render";
 import { App, appReducer } from "./App";
-import type { AppState } from "./App";
+import type { AppState, SessionContext } from "./App";
 import { invoke } from "@tauri-apps/api/core";
+
+// Capture the latest onContextChange prop passed to the Terminal mock so
+// integration tests can fire OSC context changes through the full plumbing.
+let capturedOnContextChange: ((ctx: SessionContext) => void) | undefined;
+
+vi.mock("./components/Terminal/Terminal", () => ({
+  Terminal: vi.fn(
+    (props: { sessionId?: string; onContextChange?: (ctx: SessionContext) => void }) => {
+      capturedOnContextChange = props.onContextChange;
+      // Render the sentinel div so existing tests that query terminal-root continue to work.
+      return <div data-testid="terminal-root" />;
+    },
+  ),
+}));
 
 // Mock xterm to avoid jsdom canvas/layout API issues
 vi.mock("@xterm/xterm", () => {
@@ -16,6 +31,7 @@ vi.mock("@xterm/xterm", () => {
         loadAddon: vi.fn(),
         dispose: vi.fn(),
         onData: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+        parser: { registerOscHandler: vi.fn().mockReturnValue({ dispose: vi.fn() }) },
       };
     }),
   };
@@ -42,9 +58,15 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 type AnyMock = ReturnType<typeof vi.fn>;
 
+// Integration note: the OSC 7 / OSC 7337 → SessionCard row-2 propagation chain is
+// covered by appReducer unit tests (below) and SessionCard.test.tsx tests 12-15.
+// No component-level integration test is added here because the xterm OSC handlers
+// never fire in jsdom (xterm is fully mocked), making a component-level test of the
+// full chain impractical without significant test-infrastructure investment.
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    capturedOnContextChange = undefined;
     (invoke as unknown as AnyMock).mockResolvedValue(undefined);
 
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
@@ -246,18 +268,89 @@ describe("App", () => {
     // The tab must remain selected — null must be ignored.
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
+
+  it("SessionCard row-2 updates when the Terminal's onContextChange callback fires", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card" }));
+
+    // Fire the onContextChange callback captured from the Terminal mock.
+    await act(async () => {
+      capturedOnContextChange?.({
+        cwd: "/home/user/project/backend-service",
+        git: { repo: "backend-service", branch: "main" },
+      });
+    });
+
+    // SessionCard row-2 should now show the repo name and branch.
+    expect(screen.getByText("backend-service")).toBeInTheDocument();
+    expect(screen.getByText("main")).toBeInTheDocument();
+  });
 });
 
 describe("appReducer", () => {
   it("activate ignores null while cards exist", () => {
     const card = { id: "test-uuid-1" };
-    const state: AppState = { cards: [card], activeId: "test-uuid-1" };
+    const state: AppState = { cards: [card], activeId: "test-uuid-1", contexts: {} };
     expect(appReducer(state, { type: "activate", id: null })).toBe(state); // referential equality
   });
 
   it("activate accepts null when no cards exist", () => {
-    const state: AppState = { cards: [], activeId: null };
+    const state: AppState = { cards: [], activeId: null, contexts: {} };
     const result = appReducer(state, { type: "activate", id: null });
-    expect(result).toEqual({ cards: [], activeId: null });
+    expect(result).toEqual({ cards: [], activeId: null, contexts: {} });
+  });
+
+  it("add seeds an empty context for the new card", () => {
+    const state: AppState = { cards: [], activeId: null, contexts: {} };
+    const result = appReducer(state, { type: "add" });
+    const newId = result.cards[0]!.id;
+    expect(result.contexts[newId]).toEqual({ cwd: null, git: null });
+  });
+
+  it("remove deletes the context entry for the removed card", () => {
+    const cardId = "test-uuid-1";
+    const state: AppState = {
+      cards: [{ id: cardId }],
+      activeId: cardId,
+      contexts: { [cardId]: { cwd: "/home/user", git: null } },
+    };
+    const result = appReducer(state, { type: "remove", id: cardId });
+    expect(result.contexts[cardId]).toBeUndefined();
+  });
+
+  it("setContext merges the ctx into the matching session", () => {
+    const cardId = "test-uuid-1";
+    const otherId = "test-uuid-2";
+    const state: AppState = {
+      cards: [{ id: cardId }, { id: otherId }],
+      activeId: cardId,
+      contexts: {
+        [cardId]: { cwd: null, git: null },
+        [otherId]: { cwd: "/other", git: null },
+      },
+    };
+    const newCtx = { cwd: "/foo", git: { repo: "my-repo", branch: "main" } };
+    const result = appReducer(state, { type: "setContext", id: cardId, ctx: newCtx });
+    expect(result.contexts[cardId]).toEqual(newCtx);
+    // Other sessions unaffected.
+    expect(result.contexts[otherId]).toEqual({ cwd: "/other", git: null });
+  });
+
+  it("setContext for a removed id is a no-op (returns same state reference)", () => {
+    const cardId = "test-uuid-1";
+    const removedId = "test-uuid-removed";
+    const state: AppState = {
+      cards: [{ id: cardId }],
+      activeId: cardId,
+      contexts: { [cardId]: { cwd: null, git: null } },
+    };
+    const result = appReducer(state, {
+      type: "setContext",
+      id: removedId,
+      ctx: { cwd: "/foo", git: null },
+    });
+    expect(result).toBe(state); // referential equality — no-op
   });
 });

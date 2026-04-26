@@ -1,12 +1,20 @@
 import { useCallback, useReducer } from "react";
 import { AppLayout } from "./components/layout";
 import type { Card } from "./types/card";
+import type { SessionContext } from "./components/Terminal/Terminal";
+
+// Re-export SessionContext from Terminal so consumers can import it from App
+// without creating a circular dependency chain.
+export type { SessionContext };
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
 export interface AppState {
   cards: Card[];
   activeId: string | null;
+  // Per-session CWD and git context, keyed by card/session id.
+  // Kept as a sibling map (not embedded in Card) so the Card interface stays unchanged.
+  contexts: Record<string, SessionContext>;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -14,7 +22,8 @@ export interface AppState {
 type AppAction =
   | { type: "add" }
   | { type: "remove"; id: string }
-  | { type: "activate"; id: string | null };
+  | { type: "activate"; id: string | null }
+  | { type: "setContext"; id: string; ctx: SessionContext };
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +36,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         cards: [...state.cards, newCard],
         // Always activate the newly added card — conventional UX for terminal apps.
         activeId: newCard.id,
+        // Seed an empty context for the new session.
+        contexts: { ...state.contexts, [newCard.id]: { cwd: null, git: null } },
       };
     }
     case "remove": {
@@ -48,7 +59,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         }
       }
 
-      return { cards: remaining, activeId: nextActiveId };
+      // Remove the context entry to prevent the map from growing unboundedly.
+      const { [action.id]: _removed, ...remainingContexts } = state.contexts;
+      return { cards: remaining, activeId: nextActiveId, contexts: remainingContexts };
     }
     case "activate": {
       if (action.id === null && state.cards.length > 0) {
@@ -56,12 +69,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
       return { ...state, activeId: action.id };
     }
+    case "setContext": {
+      // If the session no longer exists (stale OSC after card removal), no-op.
+      if (!(action.id in state.contexts)) {
+        return state;
+      }
+      return { ...state, contexts: { ...state.contexts, [action.id]: action.ctx } };
+    }
     default:
       return state;
   }
 }
 
-const initialState: AppState = { cards: [], activeId: null };
+const initialState: AppState = { cards: [], activeId: null, contexts: {} };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +102,10 @@ export function App() {
     dispatch({ type: "activate", id: value });
   }, []);
 
+  const setContext = useCallback((id: string, ctx: SessionContext) => {
+    dispatch({ type: "setContext", id, ctx });
+  }, []);
+
   return (
     <AppLayout
       cards={state.cards}
@@ -89,6 +113,8 @@ export function App() {
       onActiveIdChange={setActiveId}
       onAddCard={addCard}
       onRemoveCard={removeCard}
+      contexts={state.contexts}
+      onContextChange={setContext}
     />
   );
 }

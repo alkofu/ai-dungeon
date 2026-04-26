@@ -96,6 +96,18 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 
 Branch protection rules should be configured to require the `check` job before merging (follow-up item).
 
+### OSC 7 / OSC 7337 verification
+
+After `pnpm tauri dev` opens the app window, perform the following checks to confirm the OSC-based CWD and git context plumbing is working end-to-end.
+
+1. **Status bar initial state** — Open the app and add a card. Confirm the status bar at the bottom of the panel shows `…` for the CWD while the shell prompt is initialising. After pressing Enter (or running any command) the status bar should update to the actual working directory (e.g. your home directory).
+2. **CWD update on cd** — Run `cd /tmp` (or any non-git directory). Confirm the CWD in the status bar updates to `/tmp` and the git half of the status bar is empty.
+3. **Git context appears on cd into a repo** — Run `cd` back into the ai-dungeon worktree directory. Confirm the right side of the status bar shows `ai-dungeon · feat/implement-osc7-based-solution` (or the current branch name).
+4. **Detached HEAD display** — Inside any git repo, run `git checkout --detach HEAD`. Confirm the branch slot on the right shows the short commit hash (e.g. `ai-dungeon · a1b2c3d`) instead of failing or showing an empty string.
+5. **Per-card independence** — Add a second card. Confirm each card's status bar tracks its own CWD and git context independently — running `cd /tmp` in card 1 must not change card 2's status bar.
+6. **Context persists across tab switches** — Switch between tabs back and forth. Confirm the status bar values for each card are preserved across switches (keepMounted proof).
+7. **Hook removal resilience** — In a single session, run `unset PROMPT_COMMAND; precmd_functions=()` (or the equivalent for your shell) to disable the hook. Confirm the status bar stops updating but does not crash. Close and reopen the card — confirm the hook is re-injected on the new PTY and the status bar starts updating again.
+
 ## Rust Tests (Future Work)
 
 The Rust backend (`src-tauri/`) exposes four PTY commands — `pty_spawn`, `pty_write`, `pty_resize`, and `pty_kill` — implemented in `src-tauri/src/pty.rs`. Unit tests for these commands require a real PTY device, which is unavailable in most CI environments and non-trivial to mock at the `portable-pty` trait boundary. Rust unit tests for the PTY layer are therefore deferred as future work. When added, they will use standard `#[cfg(test)]` modules and `cargo test`. No additional Rust test dependencies are anticipated.

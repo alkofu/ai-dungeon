@@ -1,6 +1,7 @@
 import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import type { Card } from "../../types/card";
+import type { SessionContext } from "../Terminal/Terminal";
 import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
 
@@ -13,6 +14,8 @@ interface AppLayoutProps {
   onRemoveCard: (id: string) => void;
   activeId: string | null;
   onActiveIdChange: (value: string | null) => void;
+  contexts: Record<string, SessionContext>;
+  onContextChange: (id: string, ctx: SessionContext) => void;
 }
 
 export function AppLayout({
@@ -21,6 +24,8 @@ export function AppLayout({
   onRemoveCard,
   activeId,
   onActiveIdChange,
+  contexts,
+  onContextChange,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
 
@@ -76,7 +81,12 @@ export function AppLayout({
         </AppShell.Header>
 
         <AppShell.Navbar p="md">
-          <NavBar cards={cards} onAddCard={onAddCard} onRemoveCard={onRemoveCard} />
+          <NavBar
+            cards={cards}
+            onAddCard={onAddCard}
+            onRemoveCard={onRemoveCard}
+            contexts={contexts}
+          />
         </AppShell.Navbar>
 
         <AppShell.Main>
@@ -92,7 +102,10 @@ export function AppLayout({
               // available space, whereas height: 100% does not resolve reliably
               // against a flex-column parent without an explicit definite height.
               <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
-                <Terminal sessionId={card.id} />
+                <Terminal
+                  sessionId={card.id}
+                  onContextChange={(ctx) => onContextChange(card.id, ctx)}
+                />
               </Tabs.Panel>
             ))
           )}

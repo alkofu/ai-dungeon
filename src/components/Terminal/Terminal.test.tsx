@@ -7,6 +7,10 @@
 const onDataDisposeSpy = vi.fn();
 const onDataSpy = vi.fn().mockReturnValue({ dispose: onDataDisposeSpy });
 
+// OSC handler spies — module-scoped so tests can extract registered handlers.
+const oscHandlerDisposeSpy = vi.fn();
+const registerOscHandlerSpy = vi.fn().mockReturnValue({ dispose: oscHandlerDisposeSpy });
+
 vi.mock("@xterm/xterm", () => {
   const writeSpy = vi.fn();
   const writelnSpy = vi.fn();
@@ -21,6 +25,7 @@ vi.mock("@xterm/xterm", () => {
       loadAddon: loadAddonSpy,
       dispose: disposeSpy,
       onData: onDataSpy,
+      parser: { registerOscHandler: registerOscHandlerSpy },
     };
   }
   return { Terminal: vi.fn().mockImplementation(MockTerminal) };
@@ -461,6 +466,94 @@ describe("Terminal", () => {
       );
     });
     expect(termInstance.writeln).toHaveBeenCalledWith(expect.stringContaining("write failed"));
+  });
+
+  // ── OSC handler registration ──────────────────────────────────────────────
+
+  it("registers OSC 7 and OSC 7337 handlers on mount", () => {
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+    const oscCodes = registerOscHandlerSpy.mock.calls.map((c: unknown[]) => c[0]);
+    expect(oscCodes).toContain(7);
+    expect(oscCodes).toContain(7337);
+  });
+
+  it("calls onContextChange with parsed CWD when OSC 7 fires", () => {
+    const onContextChange = vi.fn();
+    renderWithProviders(
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onContextChange={onContextChange}
+      />,
+    );
+
+    // Extract the OSC 7 handler by finding the call with first arg === 7.
+    const osc7Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7);
+    expect(osc7Call).toBeDefined();
+    const osc7Handler = osc7Call![1] as (data: string) => boolean | Promise<boolean>;
+
+    osc7Handler("file://localhost/Users/me/projects/foo");
+
+    expect(onContextChange).toHaveBeenCalledWith({ cwd: "/Users/me/projects/foo", git: null });
+  });
+
+  it("calls onContextChange with parsed git context when OSC 7337 fires (non-empty payload)", () => {
+    const onContextChange = vi.fn();
+    renderWithProviders(
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onContextChange={onContextChange}
+      />,
+    );
+
+    // Fire OSC 7 first to establish a CWD (lastCwd).
+    const osc7Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7);
+    const osc7Handler = osc7Call![1] as (data: string) => boolean | Promise<boolean>;
+    osc7Handler("file://localhost/Users/me/projects/foo");
+
+    // Extract and fire the OSC 7337 handler.
+    const osc7337Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7337);
+    expect(osc7337Call).toBeDefined();
+    const osc7337Handler = osc7337Call![1] as (data: string) => boolean | Promise<boolean>;
+
+    osc7Handler("file://localhost/Users/me/projects/foo");
+    osc7337Handler("my-repo\tmain");
+
+    expect(onContextChange).toHaveBeenLastCalledWith({
+      cwd: "/Users/me/projects/foo",
+      git: { repo: "my-repo", branch: "main" },
+    });
+  });
+
+  it("calls onContextChange with git: null when OSC 7337 fires with empty payload", () => {
+    const onContextChange = vi.fn();
+    renderWithProviders(
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onContextChange={onContextChange}
+      />,
+    );
+
+    // First set a non-null git context.
+    const osc7337Call = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7337);
+    const osc7337Handler = osc7337Call![1] as (data: string) => boolean | Promise<boolean>;
+    osc7337Handler("my-repo\tmain");
+
+    // Now fire with empty payload — git should become null.
+    osc7337Handler("");
+
+    expect(onContextChange).toHaveBeenLastCalledWith({ cwd: null, git: null });
+  });
+
+  it("OSC handlers are disposed on unmount", () => {
+    const { unmount } = renderWithProviders(
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
+    );
+
+    unmount();
+
+    // Each registered handler returns { dispose: oscHandlerDisposeSpy }; both
+    // should be disposed once (one for OSC 7, one for OSC 7337).
+    expect(oscHandlerDisposeSpy).toHaveBeenCalledTimes(2);
   });
 
   it("does not call term.writeln on pty_write error after unmount (flush-path .catch cancelled guard)", async () => {

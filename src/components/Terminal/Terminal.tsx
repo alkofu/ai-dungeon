@@ -4,15 +4,28 @@ import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+export interface SessionContext {
+  cwd: string | null;
+  git: { repo: string; branch: string } | null;
+}
+
 interface TerminalProps {
   // The caller supplies a stable UUID that identifies this PTY session. The
   // same sessionId across re-renders means the same shell; a different sessionId
   // triggers a full unmount/re-spawn via the useEffect dependency array.
   sessionId: string;
+  // Called whenever an OSC 7 or OSC 7337 sequence arrives with updated context.
+  // Optional so existing callers that omit it continue to type-check.
+  onContextChange?: (ctx: SessionContext) => void;
 }
 
-export function Terminal({ sessionId }: TerminalProps) {
+export function Terminal({ sessionId, onContextChange }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Stable ref so OSC handlers always call the latest callback without needing
+  // it in the useEffect dependency array (which would re-mount the terminal on
+  // every render where the parent re-creates the callback reference).
+  const onContextChangeRef = useRef(onContextChange);
+  onContextChangeRef.current = onContextChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -41,6 +54,47 @@ export function Terminal({ sessionId }: TerminalProps) {
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
+
+    // ── OSC 7 / OSC 7337 context handlers ────────────────────────────────────
+    // Closure-scoped state threads both fields through each handler.
+    // Per-effect-instance: resets on sessionId change (correct — new shell session)
+    // but overwrites parent state if the Terminal remounts without a sessionId change.
+    let lastCwd: string | null = null;
+    let lastGit: { repo: string; branch: string } | null = null;
+
+    // OSC 7: file://hostname/path — update CWD.
+    // Uses new URL().pathname to correctly handle both file://hostname/path and
+    // file:///path (empty host). decodeURIComponent handles percent-encoded
+    // characters (e.g. spaces in directory names); the inner try/catch falls back
+    // to the raw pathname if the encoding is malformed.
+    const osc7Handler = term.parser.registerOscHandler(7, (data): boolean | Promise<boolean> => {
+      try {
+        try {
+          lastCwd = decodeURIComponent(new URL(data).pathname);
+        } catch {
+          lastCwd = new URL(data).pathname; // fallback: use raw pathname if decode fails
+        }
+      } catch {
+        // Malformed URL — leave lastCwd unchanged.
+      }
+      onContextChangeRef.current?.({ cwd: lastCwd, git: lastGit });
+      return true;
+    });
+
+    // OSC 7337: custom git context — empty payload clears, "repo\tbranch" sets.
+    const osc7337Handler = term.parser.registerOscHandler(
+      7337,
+      (data): boolean | Promise<boolean> => {
+        if (data === "") {
+          lastGit = null;
+        } else {
+          const [repo, branch] = data.split("\t");
+          lastGit = { repo, branch };
+        }
+        onContextChangeRef.current?.({ cwd: lastCwd, git: lastGit });
+        return true;
+      },
+    );
 
     // ── encodeBase64 helper ───────────────────────────────────────────────────
     // Encodes a xterm data string to UTF-8 bytes, then base64. Returns the
@@ -195,6 +249,8 @@ export function Terminal({ sessionId }: TerminalProps) {
       pendingWrites.length = 0;
       observer.disconnect();
       onDataDisposable?.dispose();
+      osc7Handler.dispose();
+      osc7337Handler.dispose();
       unlistenOutput?.();
       unlistenExit?.();
       // Fire-and-forget: kill errors are non-fatal during teardown.

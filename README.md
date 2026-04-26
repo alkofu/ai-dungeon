@@ -12,6 +12,7 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 - **Multiple AI CLIs in one place** — designed to host tools like Claude Code, OpenCode, and other terminal-based AI assistants.
 - **Native desktop app** — built on Tauri v2 for a fast, lightweight shell around a modern web UI.
 - **Secure by default** — restrictive Content Security Policy and minimal Tauri capabilities out of the box. See [docs/security.md](docs/security.md).
+- **Live session context in the navbar** — each `SessionCard` in the sidebar shows the shell's current working directory and git context (repo name + active branch) in its second row, updated after every command via OSC 7 and OSC 7337 escape sequences. When git context is present, row 2 shows `repo : branch • path-tail`; otherwise only the path-tail is shown. Supported shells: bash and zsh. Fish and csh are not supported in this iteration.
 
 ## UI Overview
 
@@ -22,6 +23,12 @@ The app uses a three-part Mantine `AppShell`:
 - **Main pane** — one `Tabs.Panel` per card, each containing an xterm.js terminal connected to a real shell via Tauri IPC. Inactive panels are hidden with CSS (`display: none`) but remain mounted, keeping their PTY sessions alive.
 
 When there are no cards, the main pane shows an empty-state prompt and the sidebar shows "No cards yet".
+
+### Terminal context (OSC 7 / OSC 7337)
+
+At PTY spawn time the Rust backend injects a small shell hook (`PROMPT_COMMAND` for bash, `precmd` for zsh). After every command the hook emits two escape sequences: OSC 7 encodes the CWD as a `file://` URI and OSC 7337 carries a `CurrentDir` notification. xterm.js intercepts both via `parser.registerOscHandler` and lifts the parsed values into a per-tab `SessionContext` (cwd, repo name, branch) held in the top-level `AppState`. `AppLayout` threads each tab's context through `NavBar` to the corresponding `SessionCard`, where row 2 renders `repo : branch • path-tail` (git present) or just the path-tail right-aligned (no git). Each tab's context is independent and survives tab switches.
+
+Manual verification steps for this feature are in [TESTING.md § OSC 7 / OSC 7337 verification](TESTING.md#osc-7--osc-7337-verification).
 
 ## Quick Start
 
