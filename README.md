@@ -18,7 +18,7 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 The app uses a three-part Mantine `AppShell`:
 
 - **Header** — app title and navbar toggle.
-- **Navbar (left sidebar)** — a "Cards" section with a `+` button to add cards. Each card is a `Tabs.Tab`; clicking it activates the corresponding terminal. A small `×` button on each tab removes the card and kills its PTY session.
+- **Navbar (left sidebar)** — a "Cards" section with a `+` button to add cards. Each card is a `Tabs.Tab` whose label is rendered by the `SessionCard` component: a 3-row block showing the session slug, `repo:branch • path-tail`, and PR / Issue badges. Clicking the tab activates the corresponding terminal; the `×` button in the top-right of each card removes it and kills its PTY session.
 - **Main pane** — one `Tabs.Panel` per card, each containing an xterm.js terminal connected to a real shell via Tauri IPC. Inactive panels are hidden with CSS (`display: none`) but remain mounted, keeping their PTY sessions alive.
 
 When there are no cards, the main pane shows an empty-state prompt and the sidebar shows "No cards yet".
