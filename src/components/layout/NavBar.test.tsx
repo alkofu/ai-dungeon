@@ -44,7 +44,9 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderNavBar(<NavBar cards={[]} onAddCard={onAddCard} onRemoveCard={onRemoveCard} sessionMeta={{}} />);
+    renderNavBar(
+      <NavBar cards={[]} onAddCard={onAddCard} onRemoveCard={onRemoveCard} sessionMeta={{}} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
 
@@ -57,7 +59,12 @@ describe("NavBar", () => {
     const user = userEvent.setup();
 
     renderNavBar(
-      <NavBar cards={[{ id: "a" }, { id: "b" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} sessionMeta={{}} />,
+      <NavBar
+        cards={[{ id: "a" }, { id: "b" }]}
+        onAddCard={vi.fn()}
+        onRemoveCard={onRemoveCard}
+        sessionMeta={{}}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Remove card a" }));
@@ -70,7 +77,14 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderNavBar(<NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} sessionMeta={{}} />);
+    renderNavBar(
+      <NavBar
+        cards={[{ id: "a" }]}
+        onAddCard={vi.fn()}
+        onRemoveCard={onRemoveCard}
+        sessionMeta={{}}
+      />,
+    );
 
     const closeButton = screen.getByRole("button", { name: "Remove card a" });
     closeButton.focus();
@@ -84,7 +98,14 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderNavBar(<NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} sessionMeta={{}} />);
+    renderNavBar(
+      <NavBar
+        cards={[{ id: "a" }]}
+        onAddCard={vi.fn()}
+        onRemoveCard={onRemoveCard}
+        sessionMeta={{}}
+      />,
+    );
 
     const closeButton = screen.getByRole("button", { name: "Remove card a" });
     closeButton.focus();
@@ -144,7 +165,12 @@ describe("NavBar", () => {
 
     renderWithProviders(
       <Tabs value={null} onChange={onChange} orientation="vertical">
-        <NavBar cards={[{ id: "a" }]} onAddCard={vi.fn()} onRemoveCard={onRemoveCard} sessionMeta={{}} />
+        <NavBar
+          cards={[{ id: "a" }]}
+          onAddCard={vi.fn()}
+          onRemoveCard={onRemoveCard}
+          sessionMeta={{}}
+        />
       </Tabs>,
     );
 

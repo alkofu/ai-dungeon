@@ -63,9 +63,7 @@ describe("parseSessionMetaPayload", () => {
   });
 
   it("happy path: BRANCH takes precedence over WORKTREE when both present", () => {
-    const result = parseSessionMetaPayload(
-      raw({ BRANCH: "main", WORKTREE: "wt/main" }),
-    );
+    const result = parseSessionMetaPayload(raw({ BRANCH: "main", WORKTREE: "wt/main" }));
     expect(result).not.toBeNull();
     expect(result!.branch).toBe("main");
   });
@@ -151,11 +149,15 @@ describe("parseSessionMetaPayload", () => {
   });
 
   it("rejects REPO with '..' owner segment", () => {
-    expect(parseSessionMetaPayload(JSON.stringify({ ...VALID_PAYLOAD, REPO: "../passwd" }))).toBeNull();
+    expect(
+      parseSessionMetaPayload(JSON.stringify({ ...VALID_PAYLOAD, REPO: "../passwd" })),
+    ).toBeNull();
   });
 
   it("rejects REPO with '..' name segment", () => {
-    expect(parseSessionMetaPayload(JSON.stringify({ ...VALID_PAYLOAD, REPO: "owner/.." }))).toBeNull();
+    expect(
+      parseSessionMetaPayload(JSON.stringify({ ...VALID_PAYLOAD, REPO: "owner/.." })),
+    ).toBeNull();
   });
 
   it("adversarial: SESSION_SLUG containing ESC char returns null", () => {
