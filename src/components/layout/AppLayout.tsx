@@ -1,7 +1,9 @@
 import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import type { Card } from "../../types/card";
+import type { SessionContext } from "../Terminal/Terminal";
 import { NavBar } from "./NavBar";
+import { StatusBar } from "./StatusBar";
 import { Terminal } from "../Terminal";
 
 // Only consumer is App.tsx. `children` has been removed — AppLayout renders
@@ -13,6 +15,8 @@ interface AppLayoutProps {
   onRemoveCard: (id: string) => void;
   activeId: string | null;
   onActiveIdChange: (value: string | null) => void;
+  contexts: Record<string, SessionContext>;
+  onContextChange: (id: string, ctx: SessionContext) => void;
 }
 
 export function AppLayout({
@@ -21,6 +25,8 @@ export function AppLayout({
   onRemoveCard,
   activeId,
   onActiveIdChange,
+  contexts,
+  onContextChange,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
 
@@ -91,8 +97,20 @@ export function AppLayout({
               // is already a flex column — flex children need flex: 1 to fill the
               // available space, whereas height: 100% does not resolve reliably
               // against a flex-column parent without an explicit definite height.
-              <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
-                <Terminal sessionId={card.id} />
+              // display: flex + flexDirection: column so the Terminal fills
+              // available space and the StatusBar pins to the bottom.
+              <Tabs.Panel
+                key={card.id}
+                value={card.id}
+                style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+              >
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  <Terminal
+                    sessionId={card.id}
+                    onContextChange={(ctx) => onContextChange(card.id, ctx)}
+                  />
+                </div>
+                <StatusBar context={contexts[card.id] ?? { cwd: null, git: null }} />
               </Tabs.Panel>
             ))
           )}

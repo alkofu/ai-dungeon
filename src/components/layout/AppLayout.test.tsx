@@ -6,6 +6,7 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon: vi.fn(),
     dispose: vi.fn(),
     onData: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+    parser: { registerOscHandler: vi.fn().mockReturnValue({ dispose: vi.fn() }) },
   })),
 }));
 
@@ -44,6 +45,8 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId={null}
         onActiveIdChange={vi.fn()}
+        contexts={{}}
+        onContextChange={vi.fn()}
       />,
     );
 

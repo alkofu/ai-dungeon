@@ -11,6 +11,62 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem as _};
 use tauri::{AppHandle, Emitter, State};
 
+// ── Shell init polyglot ───────────────────────────────────────────────────────
+//
+// This string is written verbatim to the PTY master immediately after spawn so
+// that the shell's line discipline queues it as stdin before the user's rc
+// files finish executing.
+//
+// Known limitation (rc-file race): the bytes are written before the shell has
+// read its rc file, relying on the TTY line discipline to buffer the input until
+// the shell is ready. This usually works, but a user's ~/.zshrc that does
+// `precmd_functions=()` (bare assignment, not `+=`) would clobber our hook.
+// The mitigation is `add-zsh-hook` on zsh (deduplication-safe, append-style)
+// and `PROMPT_COMMAND` prepend on bash (safe against user appends, but not
+// against outright replacement with bare assignment).
+//
+// The script:
+//   1. Defines __ai_dungeon_emit_ctx() which emits OSC 7 (CWD) and OSC 7337
+//      (git context) after every prompt.
+//   2. Wires the function into the prompt cycle for bash and zsh.
+//   3. Is a single newline-terminated line suitable for piping to a shell stdin.
+#[cfg(unix)]
+const SHELL_INIT_POLYGLOT: &str = concat!(
+    // Define the context-emission function.
+    "__ai_dungeon_emit_ctx() {",
+    // Emit OSC 7: file://hostname/cwd for the current working directory.
+    // Uses ${HOST:-${HOSTNAME}}: zsh exports $HOST, bash exports $HOSTNAME.
+    " printf '\\033]7;file://%s%s\\033\\\\' \"${HOST:-${HOSTNAME}}\" \"${PWD}\";",
+    // Fast pre-check — exits non-zero immediately outside a git repo (traverses
+    // up to first mount point). On network filesystems or very deep trees this
+    // may add prompt latency.
+    " if git rev-parse --git-dir >/dev/null 2>&1; then",
+    // Guard: only emit OSC 7337 with payload when show-toplevel succeeds and is
+    // non-empty. When inside a .git directory, --git-dir succeeds but
+    // --show-toplevel may fail or return empty.
+    "  repo_top=$(git rev-parse --show-toplevel 2>/dev/null);",
+    "  if [ -n \"$repo_top\" ]; then",
+    "   repo=$(basename \"$repo_top\");",
+    "   branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null);",
+    "   printf '\\033]7337;%s\\t%s\\033\\\\' \"$repo\" \"$branch\";",
+    "  else",
+    // Inside a .git directory or bare repo — emit empty payload to clear git context.
+    "   printf '\\033]7337;\\033\\\\';",
+    "  fi;",
+    " else",
+    // Not in a git repo — emit empty OSC 7337 payload to clear stale git state.
+    "  printf '\\033]7337;\\033\\\\';",
+    " fi",
+    "}; ",
+    // Wire into zsh via add-zsh-hook (deduplication-safe, append-style).
+    "if [ -n \"$ZSH_VERSION\" ]; then",
+    " autoload -U add-zsh-hook && add-zsh-hook precmd __ai_dungeon_emit_ctx;",
+    // Wire into bash by prepending to PROMPT_COMMAND (safe against user appends).
+    "elif [ -n \"$BASH_VERSION\" ]; then",
+    " PROMPT_COMMAND=\"__ai_dungeon_emit_ctx${PROMPT_COMMAND:+; $PROMPT_COMMAND}\";",
+    "fi\n",
+);
+
 // ── Session ──────────────────────────────────────────────────────────────────
 
 pub struct PtySession {
@@ -123,6 +179,28 @@ pub async fn pty_spawn(
         .lock()
         .map_err(|_| "state mutex poisoned".to_string())?
         .insert(session_id.clone(), Arc::clone(&session));
+
+    // Inject the shell init polyglot on Unix so bash/zsh emit OSC 7 (CWD) and
+    // OSC 7337 (git context) after every prompt cycle. The bytes are written
+    // after session insertion so cleanup (pty_kill) can always find the session.
+    // On error we log and proceed — failure to inject does not abort pty_spawn;
+    // the terminal still works, just without OSC context updates.
+    #[cfg(unix)]
+    {
+        match session.writer.lock() {
+            Ok(mut w) => {
+                if let Err(e) = w
+                    .write_all(SHELL_INIT_POLYGLOT.as_bytes())
+                    .and_then(|_| w.flush())
+                {
+                    eprintln!("[ai-dungeon] shell init injection failed: {e}");
+                }
+            }
+            Err(_) => {
+                eprintln!("[ai-dungeon] shell init injection skipped: writer mutex poisoned");
+            }
+        }
+    }
 
     // Spawn a blocking thread for the PTY read loop. The reader holds an
     // independent cloned handle — the master mutex remains free for
