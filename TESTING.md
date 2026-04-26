@@ -122,10 +122,10 @@ Tests that exercise the PTY commands (`pty_spawn`, `pty_write`, `pty_resize`, `p
 
 The existing unit tests cover the map/generation layer without spawning a real shell:
 
-| Test | What it covers |
-| ---- | -------------- |
-| `pty_spawn_rejects_duplicate_session_id` | `try_reserve_session_id` returns `Err("session already exists: …")` on a duplicate sid and leaves the original reservation intact |
-| `pty_kill_with_stale_generation_is_noop` | `pty_kill` with an old generation token is a no-op; the session at the newer generation survives |
-| `pty_kill_with_matching_generation_removes_session` | `pty_kill` with the matching generation removes the session |
-| `pty_kill_with_none_generation_removes_session` | `pty_kill` with `None` removes the session unconditionally |
+| Test                                                | What it covers                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pty_spawn_rejects_duplicate_session_id`            | `try_reserve_session_id` returns `Err("session already exists: …")` on a duplicate sid and leaves the original reservation intact                      |
+| `pty_kill_with_stale_generation_is_noop`            | `pty_kill` with an old generation token is a no-op; the session at the newer generation survives                                                       |
+| `pty_kill_with_matching_generation_removes_session` | `pty_kill` with the matching generation removes the session                                                                                            |
+| `pty_kill_with_none_generation_removes_session`     | `pty_kill` with `None` removes the session unconditionally                                                                                             |
 | `pty_kill_command_accepts_missing_generation_field` | serde deserialises a JSON payload missing the `generation` key as `generation: None` (necessary — not sufficient — signal for Tauri IPC compatibility) |
