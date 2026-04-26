@@ -50,6 +50,11 @@ export function AppLayout({
         }}
         padding="md"
         styles={{
+          // <Tabs orientation="vertical"> renders as display:flex; flex-direction:row.
+          // <AppShell> is the sole flex child of that row and would otherwise size
+          // to its intrinsic content width. flex:1 makes it stretch to fill the row,
+          // and minWidth:0 permits horizontal shrinkage so contents can flex correctly.
+          root: { flex: 1, minWidth: 0 },
           main: {
             display: "flex",
             flexDirection: "column",
