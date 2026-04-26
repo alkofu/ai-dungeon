@@ -58,6 +58,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 type AnyMock = ReturnType<typeof vi.fn>;
 
+// Integration note: the OSC 7 / OSC 7337 → SessionCard row-2 propagation chain is
+// covered by appReducer unit tests (below) and SessionCard.test.tsx tests 12-15.
+// No component-level integration test is added here because the xterm OSC handlers
+// never fire in jsdom (xterm is fully mocked), making a component-level test of the
+// full chain impractical without significant test-infrastructure investment.
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -264,31 +269,23 @@ describe("App", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("renders a status bar inside the active panel", async () => {
+  it("SessionCard row-2 updates when the Terminal's onContextChange callback fires", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
-
-    expect(screen.getByTestId("status-bar")).toBeInTheDocument();
-  });
-
-  it("the status bar updates when the Terminal's onContextChange callback fires", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-
-    // The status bar should start with the placeholder "…" CWD.
-    expect(screen.getByTestId("status-bar-cwd")).toHaveTextContent("…");
 
     // Fire the onContextChange callback captured from the Terminal mock.
     await act(async () => {
-      capturedOnContextChange?.({ cwd: "/foo/bar", git: { repo: "ai-dungeon", branch: "main" } });
+      capturedOnContextChange?.({
+        cwd: "/home/user/project/backend-service",
+        git: { repo: "backend-service", branch: "main" },
+      });
     });
 
-    expect(screen.getByTestId("status-bar-cwd")).toHaveTextContent("/foo/bar");
-    expect(screen.getByTestId("status-bar-git")).toHaveTextContent("ai-dungeon · main");
+    // SessionCard row-2 should now show the repo name and branch.
+    expect(screen.getByText("backend-service")).toBeInTheDocument();
+    expect(screen.getByText("main")).toBeInTheDocument();
   });
 });
 
