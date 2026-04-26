@@ -136,6 +136,7 @@ describe("NavBar", () => {
         cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }]}
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
+        contexts={{}}
       />,
     );
 
