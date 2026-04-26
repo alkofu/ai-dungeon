@@ -147,6 +147,8 @@ describe("AppLayout", () => {
             onRemoveCard={vi.fn()}
             activeId="A"
             onActiveIdChange={vi.fn()}
+            contexts={{}}
+            onContextChange={vi.fn()}
           />
         </React.StrictMode>,
       );
@@ -190,6 +192,8 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId="card-1"
         onActiveIdChange={vi.fn()}
+        contexts={{}}
+        onContextChange={vi.fn()}
       />,
     );
 
@@ -206,6 +210,8 @@ describe("AppLayout", () => {
           onRemoveCard={vi.fn()}
           activeId="card-1"
           onActiveIdChange={vi.fn()}
+          contexts={{}}
+          onContextChange={vi.fn()}
         />,
       );
       await Promise.resolve();
