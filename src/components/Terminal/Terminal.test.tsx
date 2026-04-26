@@ -40,8 +40,9 @@ vi.mock("@xterm/addon-fit", () => {
   return { FitAddon: vi.fn().mockImplementation(MockFitAddon) };
 });
 
+// Default: pty_spawn resolves to numeric generation 1 (Ruinor F-6).
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(undefined),
+  invoke: vi.fn().mockResolvedValue(1),
 }));
 
 // Each listen() call resolves to a fresh unlisten spy.
@@ -58,7 +59,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
 import { act } from "@testing-library/react";
 import { renderWithProviders } from "../../test-utils/render";
-import { Terminal } from "./Terminal";
+import { Terminal, _clearSpawnChainForTesting } from "./Terminal";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { invoke } from "@tauri-apps/api/core";
@@ -78,6 +79,12 @@ function getFitInstance() {
   return MockFitAddonCls.mock.results[MockFitAddonCls.mock.results.length - 1].value;
 }
 
+// Drain N microtask ticks. Each `await Promise.resolve()` advances the
+// microtask queue by one tick; chaining via .then() avoids a loop construct.
+function drain(n: number): Promise<void> {
+  return n <= 0 ? Promise.resolve() : Promise.resolve().then(() => drain(n - 1));
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("Terminal", () => {
@@ -86,11 +93,17 @@ describe("Terminal", () => {
     // Clear captured unlisten spies from the previous test.
     unlistenSpies.length = 0;
 
-    // Restore invoke to its default behavior (resolves immediately) so that
+    // Clear the module-level spawn-chain Map so prior tests' settled (or
+    // in-flight) kill promises do not block subsequent tests' spawn calls.
+    // Each test gets a clean chain for the session IDs it uses.
+    _clearSpawnChainForTesting();
+
+    // Restore invoke to its default behavior (numeric generation 1) so that
     // tests which set a persistent mockImplementation (e.g. the "does NOT call
     // pty_resize before spawn completes" test) do not leak state into later
     // tests. vi.clearAllMocks() only clears call history, not implementations.
-    (invoke as unknown as AnyMock).mockResolvedValue(undefined);
+    // (Ruinor F-6: pty_spawn must return a numeric generation, not undefined.)
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
 
     // Restore a fresh ResizeObserver spy for each test.
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
@@ -177,11 +190,21 @@ describe("Terminal", () => {
 
     unmount();
 
+    // Synchronous cleanup side-effects fire immediately on unmount.
     expect(onDataDisposeSpy).toHaveBeenCalledTimes(1);
     expect(unlisten1).toHaveBeenCalledTimes(1);
     expect(unlisten2).toHaveBeenCalledTimes(1);
-    expect(invoke).toHaveBeenCalledWith("pty_kill", {
-      sessionId: "00000000-0000-0000-0000-000000000001",
+
+    // pty_kill is now deferred (fire-and-forget after the spawn-chain settles).
+    // Use vi.waitFor to handle the async dispatch (Ruinor F-6 timing change).
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(
+        "pty_kill",
+        expect.objectContaining({
+          sessionId: "00000000-0000-0000-0000-000000000001",
+          generation: 1,
+        }),
+      );
     });
   });
 
@@ -203,40 +226,51 @@ describe("Terminal", () => {
     expect(mockListen).not.toHaveBeenCalled();
   });
 
-  it("calls pty_kill when unmounted during in-flight spawn", async () => {
+  it("calls pty_kill exactly once via the spawn chain when unmounted during in-flight spawn", async () => {
     const mockInvoke = invoke as unknown as AnyMock;
 
     // Capture the sessionId that will be generated for this render.
     const expectedSessionId = "00000000-0000-0000-0000-000000000001";
 
     // Set up a deferred spawn promise — resolves only when we call resolveSpawn().
-    let resolveSpawn!: () => void;
-    const spawnPromise = new Promise<void>((resolve) => {
+    // Resolves to number (generation token) to match the updated pty_spawn contract.
+    let resolveSpawn!: (value: number) => void;
+    const spawnPromise = new Promise<number>((resolve) => {
       resolveSpawn = resolve;
     });
 
-    // First invoke call is pty_spawn; subsequent calls (pty_kill) resolve immediately.
+    // First invoke call is pty_spawn (deferred); subsequent calls resolve immediately.
     mockInvoke.mockImplementationOnce(() => spawnPromise);
 
     const { unmount } = renderWithProviders(
       <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,
     );
 
-    // Unmount before spawn resolves — cleanup fires pty_kill (no session yet).
+    // Unmount before spawn resolves — cleanup registers the deferred kill in the
+    // spawn chain (no immediate pty_kill IPC fires here; the old early-cancel kill
+    // has been removed per Ruinor F-5).
     act(() => {
       unmount();
     });
 
-    // Now resolve the spawn — the async IIFE resumes and must fire pty_kill again
-    // because `cancelled` is true.
+    // Now resolve the spawn — the spawn-chain's cleanup .then fires pty_kill exactly once.
     await act(async () => {
-      resolveSpawn();
+      resolveSpawn(1);
       await spawnPromise;
     });
 
+    // Drain microtasks so the deferred kill chain settles.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Exactly one pty_kill IPC call — the deferred kill from cleanup's spawn chain.
+    // The old IIFE early-cancel kill is removed (Ruinor F-5), so only one fires.
+    const killCalls = mockInvoke.mock.calls.filter((c: unknown[]) => c[0] === "pty_kill");
+    expect(killCalls).toHaveLength(1);
     expect(mockInvoke).toHaveBeenCalledWith(
       "pty_kill",
-      expect.objectContaining({ sessionId: expectedSessionId }),
+      expect.objectContaining({ sessionId: expectedSessionId, generation: 1 }),
     );
   });
 
@@ -341,8 +375,9 @@ describe("Terminal", () => {
     const mockInvoke = invoke as unknown as AnyMock;
 
     // Deferred spawn: resolves only when we call resolveSpawn().
-    let resolveSpawn!: () => void;
-    const spawnPromise = new Promise<void>((resolve) => {
+    // Resolves to number (generation token) to match the updated pty_spawn contract.
+    let resolveSpawn!: (value: number) => void;
+    const spawnPromise = new Promise<number>((resolve) => {
       resolveSpawn = resolve;
     });
 
@@ -374,7 +409,7 @@ describe("Terminal", () => {
 
     // Resolve spawn and wait for the flush loop to drain.
     await act(async () => {
-      resolveSpawn();
+      resolveSpawn(1);
       await spawnPromise;
     });
 
@@ -392,8 +427,8 @@ describe("Terminal", () => {
     const mockInvoke = invoke as unknown as AnyMock;
 
     // Deferred spawn.
-    let resolveSpawn!: () => void;
-    const spawnPromise = new Promise<void>((resolve) => {
+    let resolveSpawn!: (value: number) => void;
+    const spawnPromise = new Promise<number>((resolve) => {
       resolveSpawn = resolve;
     });
 
@@ -423,7 +458,7 @@ describe("Terminal", () => {
     // Now resolve spawn — the IIFE resumes but cancelled is true; flush loop
     // checks cancelled and breaks immediately without calling pty_write.
     await act(async () => {
-      resolveSpawn();
+      resolveSpawn(1);
       await spawnPromise;
     });
 
@@ -556,12 +591,157 @@ describe("Terminal", () => {
     expect(oscHandlerDisposeSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("does not surface spurious errors on cross-mount remount with the same sessionId (StrictMode race)", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+
+    // ── Session-aware mock (Ruinor F-9 option (a)) ────────────────────────────
+    // Track which sessions are live so pty_write correctly rejects against a
+    // killed session — this is what makes the test fail on main for the right
+    // reason (Mount A's deferred kill removes "X", causing Mount B's first
+    // pty_write to reject with "session not found").
+    const liveSessions = new Set<string>();
+    const sessionGenerations = new Map<string, number>();
+    let nextGeneration = 0;
+
+    // ── Deferred spawn promises ────────────────────────────────────────────────
+    // spawnA gates Mount A's pty_spawn; spawnB gates Mount B's pty_spawn.
+    // We resolve them manually to control ordering.
+    let resolveSpawnA!: () => void;
+    let resolveSpawnB!: () => void;
+    const deferredA = new Promise<void>((resolve) => {
+      resolveSpawnA = resolve;
+    });
+    const deferredB = new Promise<void>((resolve) => {
+      resolveSpawnB = resolve;
+    });
+
+    // Track which deferred to consume next for pty_spawn calls.
+    let spawnCallCount = 0;
+
+    mockInvoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "pty_spawn") {
+        const sid = args["sessionId"] as string;
+        const callIndex = spawnCallCount++;
+        // Gate on the appropriate deferred promise.
+        if (callIndex === 0) {
+          await deferredA;
+        } else {
+          await deferredB;
+        }
+        // Session-aware duplicate check.
+        if (liveSessions.has(sid)) {
+          throw new Error(`session already exists: ${sid}`);
+        }
+        nextGeneration += 1;
+        liveSessions.add(sid);
+        sessionGenerations.set(sid, nextGeneration);
+        return nextGeneration;
+      }
+      if (cmd === "pty_kill") {
+        const sid = args["sessionId"] as string;
+        const gen = args["generation"] as number | undefined;
+        if (gen === undefined || sessionGenerations.get(sid) === gen) {
+          liveSessions.delete(sid);
+          sessionGenerations.delete(sid);
+        }
+        // stale generation → no-op
+        return undefined;
+      }
+      if (cmd === "pty_write") {
+        const sid = args["sessionId"] as string;
+        if (!liveSessions.has(sid)) {
+          throw new Error(`pty write failed: session not found: ${sid}`);
+        }
+        return undefined;
+      }
+      return undefined;
+    });
+
+    // ── Mount A, immediately unmount, mount B (mirrors StrictMode cycle) ───────
+    let unmountA!: () => void;
+    let unmountB!: () => void;
+    await act(() => {
+      const resultA = renderWithProviders(<Terminal sessionId="X" />);
+      unmountA = resultA.unmount;
+    });
+    await act(() => {
+      unmountA();
+      const resultB = renderWithProviders(<Terminal sessionId="X" />);
+      unmountB = resultB.unmount;
+    });
+
+    // ── Resolve spawnA (generation 1 allocated, "X" added to liveSessions) ─────
+    await act(async () => {
+      resolveSpawnA();
+      await deferredA;
+      // Drain extra microtask rounds so Mount A's IIFE (cancelled→return),
+      // the cleanup kill, and killPromise settling all complete within this act.
+      await drain(10);
+    });
+
+    // ── Resolve spawnB (should be serialised after Mount A's kill is issued) ───
+    // deferredB may already be resolvable (killPromise settled above). Resolve it
+    // and drain until Mount B's IIFE registers its listen calls.
+    await act(async () => {
+      resolveSpawnB();
+      await deferredB;
+      // Drain so the mock returns, spawnPromise resolves, and the IIFE reaches listen.
+      await drain(10);
+    });
+
+    const allCalls = mockInvoke.mock.calls as [string, Record<string, unknown>][];
+    const spawnCalls = allCalls.filter((c) => c[0] === "pty_spawn");
+    const killCalls = allCalls.filter((c) => c[0] === "pty_kill");
+
+    // ── Assertion 1: ordering — Mount A's kill was issued before Mount B's spawn
+    const spawnAIndex = allCalls.findIndex((c) => c[0] === "pty_spawn");
+    const killAIndex = allCalls.findIndex(
+      (c) => c[0] === "pty_kill" && (c[1]["generation"] as number) === 1,
+    );
+    const spawnBIndex = allCalls.findIndex((c, i) => c[0] === "pty_spawn" && i > spawnAIndex);
+    expect(spawnCalls.length).toBeGreaterThanOrEqual(2);
+    expect(killCalls.length).toBeGreaterThanOrEqual(1);
+    expect(killAIndex).toBeGreaterThan(-1); // kill for gen 1 was issued
+    expect(spawnBIndex).toBeGreaterThan(killAIndex); // Mount B spawns after Mount A's kill
+
+    // ── Assertion 2: Mount B's listen calls were registered ───────────────────
+    // Mount B's IIFE calls listen after spawnB resolves. Drain a few more rounds
+    // to ensure the IIFE's listen registrations complete.
+    await act(async () => {
+      await drain(20);
+    });
+    const mockListen = listen as unknown as AnyMock;
+    const listenNames = (mockListen.mock.calls as [string][]).map((c) => c[0]);
+    // Mount B registers pty:output:X and pty:exit:X (Mount A returned early due
+    // to cancelled=true, so its listen calls never fired).
+    expect(listenNames.filter((n) => n === "pty:output:X").length).toBeGreaterThanOrEqual(1);
+    expect(listenNames.filter((n) => n === "pty:exit:X").length).toBeGreaterThanOrEqual(1);
+
+    // ── Assertion 3: no spurious error rendered in any terminal canvas ─────────
+    // Iterate ALL xterm instances created across both mounts (not just the last).
+    const MockXTerm = XTerm as unknown as AnyMock;
+    const allWritelnCalls: unknown[][] = [];
+    for (const result of MockXTerm.mock.results as Array<{ value: { writeln: AnyMock } }>) {
+      if (result.value?.writeln?.mock?.calls) {
+        allWritelnCalls.push(...(result.value.writeln.mock.calls as unknown[][]));
+      }
+    }
+    for (const [arg] of allWritelnCalls) {
+      expect(String(arg)).not.toContain("[failed to start shell");
+      expect(String(arg)).not.toContain("[pty write failed");
+    }
+
+    // Cleanup.
+    unmountB();
+  });
+
   it("does not call term.writeln on pty_write error after unmount (flush-path .catch cancelled guard)", async () => {
     const mockInvoke = invoke as unknown as AnyMock;
 
     // Deferred spawn so we can queue a keystroke before spawn resolves.
-    let resolveSpawn!: () => void;
-    const spawnPromise = new Promise<void>((resolve) => {
+    // Resolves to number (generation token) to match the updated pty_spawn contract.
+    let resolveSpawn!: (value: number) => void;
+    const spawnPromise = new Promise<number>((resolve) => {
       resolveSpawn = resolve;
     });
 
@@ -593,12 +773,12 @@ describe("Terminal", () => {
 
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "pty_write") return ptyWritePromise;
-      return Promise.resolve(undefined);
+      return Promise.resolve(1);
     });
 
     // Resolve spawn — flush loop runs, calls pty_write (promise is still pending).
     await act(async () => {
-      resolveSpawn();
+      resolveSpawn(1);
       await spawnPromise;
     });
 

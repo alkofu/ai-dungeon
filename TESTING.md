@@ -78,7 +78,7 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 4. **Terminal type** — Type `echo $TERM` and press Enter. Confirm the output is `xterm-256color`.
 5. **PTY dimensions** — Type `stty size` and press Enter. Confirm the output matches the visible terminal dimensions (rows × cols). Resize the window and run `stty size` again to confirm the dimensions update.
 6. **Shell exit** — Type `exit` and press Enter. Confirm `[process exited]` appears in the terminal and the shell does not auto-respawn.
-7. **Orphan check** — First, _while the app is still running_, verify no zombie shell processes exist: `ps aux | grep -E "$(basename $SHELL).*defunct"` should return empty. Then close the app (or run `exit`) and confirm no lingering shell processes remain: `ps aux | grep -v grep | grep "$(basename $SHELL)"` should not show a process owned by the app.
+7. **Orphan check** — Use a ppid-filtered approach to avoid conflating the user's interactive shells with app-spawned ones. Find the Tauri process pid: `APP_PID=$(pgrep -f 'ai-dungeon' | head -1)`. Then list shells whose parent is the app: `pgrep -P "$APP_PID" | xargs -I{} ps -p {} -o pid,ppid,command 2>/dev/null`. The output should be empty (no live cards) or list exactly the shells for the currently-open cards — no extras.
 8. **Broken shell path** — In `src/components/Terminal/Terminal.tsx`, temporarily set the `pty_spawn` call to use an invalid shell path. Confirm the terminal displays `[failed to start shell: ...]` instead of crashing silently.
 9. **Binary paste** — Paste a chunk of text containing special characters (e.g. emoji, accented characters, or a long block of text). Confirm the characters arrive correctly in the shell without corruption or truncation.
 
@@ -89,6 +89,8 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 12. **Remove active tab** — With two cards, make the second card active. Click its `×` button. Confirm the first card becomes active automatically and its terminal is unaffected.
 13. **Remove non-active tab** — With two cards, make the first card active. Click the second card's `×` button. Confirm the first card remains active and its terminal session is unchanged.
 14. **Return to empty state** — Remove all cards one by one. Confirm the empty-state prompt reappears in the main pane and "No cards yet" appears in the sidebar.
+15. **No spurious errors on cards 2+** — Click `+` three times to create cards 2, 3, and 4. Inspect every terminal pane. No pane must display `[pty write failed: session not found: …]` or `[failed to start shell: session already exists]` on initial render. Type a command (e.g. `echo ok`) in each terminal and confirm it produces output.
+16. **No orphaned shells after rapid add/remove** — Rapidly add five cards, then remove all of them, then add five again. Run the ppid-filtered orphan check from step 7. The shell count must equal the number of currently-live cards exactly. Any excess indicates orphaned processes — treat as a regression and do not merge.
 
 ## CI
 
@@ -108,6 +110,22 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 6. **Context persists across tab switches** — Switch between tabs back and forth. Confirm the status bar values for each card are preserved across switches (keepMounted proof).
 7. **Hook removal resilience** — In a single session, run `unset PROMPT_COMMAND; precmd_functions=()` (or the equivalent for your shell) to disable the hook. Confirm the status bar stops updating but does not crash. Close and reopen the card — confirm the hook is re-injected on the new PTY and the status bar starts updating again.
 
-## Rust Tests (Future Work)
+## Rust Tests
 
-The Rust backend (`src-tauri/`) exposes four PTY commands — `pty_spawn`, `pty_write`, `pty_resize`, and `pty_kill` — implemented in `src-tauri/src/pty.rs`. Unit tests for these commands require a real PTY device, which is unavailable in most CI environments and non-trivial to mock at the `portable-pty` trait boundary. Rust unit tests for the PTY layer are therefore deferred as future work. When added, they will use standard `#[cfg(test)]` modules and `cargo test`. No additional Rust test dependencies are anticipated.
+The Rust backend (`src-tauri/`) is tested with standard `#[cfg(test)]` modules and `cargo test`.
+
+```
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Tests that exercise the PTY commands (`pty_spawn`, `pty_write`, `pty_resize`, `pty_kill`) at the real PTY device boundary are deferred as future work — a real PTY is unavailable in most CI environments and non-trivial to mock at the `portable-pty` trait boundary.
+
+The existing unit tests cover the map/generation layer without spawning a real shell:
+
+| Test                                                | What it covers                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pty_spawn_rejects_duplicate_session_id`            | `try_reserve_session_id` returns `Err("session already exists: …")` on a duplicate sid and leaves the original reservation intact                      |
+| `pty_kill_with_stale_generation_is_noop`            | `pty_kill` with an old generation token is a no-op; the session at the newer generation survives                                                       |
+| `pty_kill_with_matching_generation_removes_session` | `pty_kill` with the matching generation removes the session                                                                                            |
+| `pty_kill_with_none_generation_removes_session`     | `pty_kill` with `None` removes the session unconditionally                                                                                             |
+| `pty_kill_command_accepts_missing_generation_field` | serde deserialises a JSON payload missing the `generation` key as `generation: None` (necessary — not sufficient — signal for Tauri IPC compatibility) |

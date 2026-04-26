@@ -19,6 +19,39 @@ interface TerminalProps {
   onContextChange?: (ctx: SessionContext) => void;
 }
 
+// ── Per-sid spawn-chain (Ruinor F-1 resolution) ───────────────────────────────
+//
+// Module-level per-sid serialisation queue. Every pty_spawn for a given
+// sessionId is awaited after the previous mount's full spawn-then-kill chain
+// has settled. This prevents StrictMode mount → unmount → remount from
+// colliding two pty_spawn calls at the backend, and prevents Mount A's
+// deferred kill from racing Mount B's fresh spawn.
+//
+// Memory bound (Ruinor F-11): each entry is a (string, settled-Promise) pair,
+// ~100 bytes per entry. 10,000 distinct sessionIds across an app session
+// therefore costs ~1 MB. We do NOT delete entries when a kill settles because
+// a sessionId can be re-mounted later (e.g., Tabs unmount/remount, future
+// session-restore features) and an early delete would race a re-mount that
+// arrives during the kill window. The trade-off is acceptable: 1 MB at
+// 10,000 entries is negligible vs. the correctness cost of a wrong-time
+// delete. If a future feature creates >10,000 unique sessionIds in one
+// app session, revisit with an LRU eviction strategy.
+//
+// Type-safety note (Ruinor F-12): the Map value is typed Promise<unknown>
+// because mount-cleanup chains mix Promise<number> (spawn) and Promise<void>
+// (kill). When a caller needs the generation token, USE THE LOCAL
+// `spawnPromise` REFERENCE (typed Promise<number>), NOT spawnChain.get(sid)
+// (typed Promise<unknown> | undefined). Reading the generation off the Map
+// would silently lose type information and require an unsafe cast.
+const spawnChain = new Map<string, Promise<unknown>>();
+
+// ── Test utility ──────────────────────────────────────────────────────────────
+// Exported so Vitest beforeEach hooks can clear the chain between tests.
+// Do NOT call this in production code.
+export function _clearSpawnChainForTesting(): void {
+  spawnChain.clear();
+}
+
 export function Terminal({ sessionId, onContextChange }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Stable ref so OSC handlers always call the latest callback without needing
@@ -159,16 +192,38 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
     });
     observer.observe(containerRef.current);
 
-    // ── Async IIFE: spawn shell + subscribe to events ─────────────────────────
+    // ── Spawn-chain: append this mount's spawn to the per-sid chain ───────────
+    // `previousChain` is whatever the prior mount (or a prior kill) settled as.
+    // The `.catch(() => undefined)` ensures a prior failure does not poison this
+    // mount — every mount gets a clean start regardless of what came before.
+    //
+    // `spawnPromise` is typed Promise<number> (the generation token returned by
+    // the backend). Always reference this local variable when you need the
+    // generation — do NOT read it back from spawnChain.get(sessionId), which is
+    // typed Promise<unknown> and would require an unsafe cast (Ruinor F-12).
+    const dims = fitAddon.proposeDimensions() ?? { cols: 80, rows: 24 };
+    const previousChain = spawnChain.get(sessionId) ?? Promise.resolve();
+    const spawnPromise: Promise<number> = previousChain
+      .catch(() => undefined)
+      .then(() => invoke<number>("pty_spawn", { sessionId, cols: dims.cols, rows: dims.rows }));
+
+    // Store a kill-tolerant version of spawnPromise in the chain so the next
+    // mount can extend it safely. The local `spawnPromise` reference (typed
+    // Promise<number>) is retained below for the IIFE and cleanup to use.
+    spawnChain.set(
+      sessionId,
+      spawnPromise.catch(() => undefined),
+    );
+
+    // ── Async IIFE: subscribe to events after spawn resolves ──────────────────
     void (async () => {
-      const dims = fitAddon.proposeDimensions() ?? { cols: 80, rows: 24 };
+      let generation: number | undefined;
 
       try {
-        await invoke("pty_spawn", {
-          sessionId,
-          cols: dims.cols,
-          rows: dims.rows,
-        });
+        // Await the spawn-chain promise (which invokes pty_spawn on the backend).
+        // This ensures Mount B's pty_spawn always starts after Mount A's pty_kill
+        // has been issued (the spawn-chain serialises them per-sid).
+        generation = await spawnPromise;
       } catch (err) {
         if (!cancelled) {
           term.writeln(`\r\n[failed to start shell: ${String(err)}]`);
@@ -176,14 +231,12 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
         return;
       }
 
-      // If the component unmounted while pty_spawn was in flight, the cleanup
-      // function already fired pty_kill (which found no session yet and returned
-      // Ok). Now that the session exists on the backend, kill it explicitly so
-      // the shell + reader thread are not orphaned.
-      if (cancelled) {
-        void invoke("pty_kill", { sessionId });
-        return;
-      }
+      // If the component unmounted while pty_spawn was in flight, cleanup's
+      // deferred kill (via the spawn chain) handles termination — no need to
+      // invoke pty_kill here.
+      // Cleanup's deferred kill (via the spawn chain) handles termination if
+      // cancelled — no need to invoke pty_kill here.
+      if (cancelled) return;
 
       // ── Listen for PTY output ───────────────────────────────────────────────
       // The payload is a base64-encoded string. We decode it to a Uint8Array
@@ -203,12 +256,15 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
         term.write(bytes);
       });
 
+      // The exit listener captures `generation` to scope its pty_kill to this
+      // mount's session — it cannot accidentally kill a successor session at the
+      // same sessionId (Ruinor F-4).
       unlistenExit = await listen(`pty:exit:${sessionId}`, () => {
         term.writeln("\r\n[process exited]");
         // Remove the dead session from the backend HashMap. pty_kill is
         // idempotent (returns Ok when the session is absent), so this is safe
         // even if cleanup has already run.
-        void invoke("pty_kill", { sessionId });
+        void invoke("pty_kill", { sessionId, generation });
       });
 
       if (cancelled) return;
@@ -253,8 +309,16 @@ export function Terminal({ sessionId, onContextChange }: TerminalProps) {
       osc7337Handler.dispose();
       unlistenOutput?.();
       unlistenExit?.();
-      // Fire-and-forget: kill errors are non-fatal during teardown.
-      void invoke("pty_kill", { sessionId });
+      // Defer pty_kill until the in-flight spawnPromise has settled.
+      // Use the local spawnPromise (typed Promise<number>) so the generation is
+      // typed as number in the .then callback. Reading from spawnChain here
+      // would erase the type to unknown (Ruinor F-12).
+      // The cleanup remains synchronous from React's perspective — the .then(...)
+      // chain is fire-and-forget and React does not await it.
+      const killPromise = spawnPromise
+        .then((generation) => invoke("pty_kill", { sessionId, generation }))
+        .catch(() => undefined); // spawn failed → nothing to kill
+      spawnChain.set(sessionId, killPromise);
       term.dispose();
     };
   }, [sessionId]);

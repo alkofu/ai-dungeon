@@ -10,7 +10,7 @@ ai-dungeon/
 │   │   └── session.ts   # SessionMeta interface (slug, repo, branch, workingDirectory, prNumber, issueNumber)
 │   └── components/
 │       ├── Terminal/
-│       │   ├── Terminal.tsx   # xterm.js wrapper — accepts sessionId prop; PTY IPC, FitAddon, base64 I/O
+│       │   ├── Terminal.tsx   # xterm.js wrapper — accepts sessionId prop; PTY IPC, FitAddon, base64 I/O; module-level per-sid spawn-chain serialises pty_spawn/pty_kill to prevent StrictMode remount races
 │       │   ├── index.ts       # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
@@ -24,7 +24,7 @@ ai-dungeon/
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point
 │   │   ├── lib.rs    # Library crate (command handlers)
-│   │   └── pty.rs    # PTY session management (spawn/write/resize/kill commands)
+│   │   └── pty.rs    # PTY session management (spawn/write/resize/kill commands); generation tokens + duplicate-ID rejection prevent orphaned sessions on rapid remount
 │   ├── capabilities/ # Tauri permission grants
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
