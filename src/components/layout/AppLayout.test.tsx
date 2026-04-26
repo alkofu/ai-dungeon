@@ -270,8 +270,9 @@ describe("AppLayout — keyboard navigation", () => {
         onRemoveCard={vi.fn()}
         activeId={activeId}
         onActiveIdChange={onActiveIdChange}
-        contexts={{}}
-        onContextChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
+        onSessionContextPatch={vi.fn()}
       />,
     );
     return { ...result, onActiveIdChange, user };
