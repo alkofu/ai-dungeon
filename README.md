@@ -9,6 +9,7 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 ## Key Features
 
 - **Card-as-tab terminals** — each card in the sidebar is a vertical tab; clicking it switches which terminal is visible in the main pane. PTY sessions are preserved across switches — the shell keeps running and scrollback is intact even when a tab is not visible.
+- **Keyboard tab navigation** — global shortcuts work whether focus is in the terminal or the sidebar. `Cmd+ArrowLeft` / `Cmd+ArrowRight` (macOS) or `Ctrl+ArrowLeft` / `Ctrl+ArrowRight` (Windows/Linux) cycle tabs with wrap-around. `Cmd/Ctrl+1` through `Cmd/Ctrl+9` jump directly to a tab by position. All eleven shortcuts suppress the WebView's default back/forward navigation unconditionally.
 - **Multiple AI CLIs in one place** — designed to host tools like Claude Code, OpenCode, and other terminal-based AI assistants.
 - **Native desktop app** — built on Tauri v2 for a fast, lightweight shell around a modern web UI.
 - **Live session metadata** — terminals receive structured session info (slug, repo, branch, working directory, PR/issue numbers) via OSC 6800 escape sequences emitted by the CLI. Each tab's sidebar card updates automatically; tabs that have not yet emitted a payload display placeholder data. All incoming data is validated before it enters app state. See [docs/project-structure.md](docs/project-structure.md#osc-session-context-flow-6800--7--7337).

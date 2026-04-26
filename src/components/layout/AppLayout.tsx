@@ -1,5 +1,6 @@
 import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
+import { useDisclosure, useHotkeys } from "@mantine/hooks";
+import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
 import type { Card } from "../../types/card";
 import type { SessionContext } from "../../types/session";
 import { NavBar } from "./NavBar";
@@ -30,6 +31,55 @@ export function AppLayout({
   onSessionContextPatch,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
+
+  const activate = (targetId: string | null) => {
+    if (targetId !== null) {
+      onActiveIdChange(targetId);
+    }
+  };
+
+  // useHotkeys registers a single document-level listener via
+  // useEffect(..., []) and uses useEffectEvent to keep the hotkeys array
+  // current — no per-render rebind occurs. The listener attaches at
+  // document.documentElement (not window/document).
+  //
+  // The second positional argument (tagsToIgnore) is explicitly set to []
+  // (overriding Mantine's default of ["INPUT","TEXTAREA","SELECT"]).
+  // Mantine's internal shouldFireEvent gates on event.target.tagName and
+  // would otherwise short-circuit when focus is in xterm's
+  // xterm-helper-textarea (the hidden HTMLTextAreaElement xterm focuses
+  // whenever the user clicks into the terminal viewport), silently
+  // breaking the central use case ("hotkeys work when focus is in the
+  // terminal"). These eleven combos are global app-navigation shortcuts,
+  // not text-entry combos — Cmd+ArrowLeft/Right and Cmd+1..Cmd+9 do not
+  // collide with any standard typing flow, so blocking them in inputs
+  // would surprise users.
+  //
+  // Note on event.preventDefault(): Mantine's useHotkeys unconditionally
+  // calls event.preventDefault() on every matched hotkey, regardless of
+  // whether the handler does anything observable. This means even when
+  // getCycleTargetId returns null (e.g. cards.length < 2, or activeId
+  // not in cards) and `activate` is a no-op, Cmd+ArrowLeft's default
+  // WebView back-navigation is still suppressed. This is intentional:
+  // we never want Cmd+ArrowLeft to trigger WebView history navigation
+  // inside the shell, so suppressing the default in the no-op case is
+  // the correct behaviour, not a leak.
+  useHotkeys(
+    [
+      ["mod+ArrowLeft", () => activate(getCycleTargetId(cards, activeId, -1))],
+      ["mod+ArrowRight", () => activate(getCycleTargetId(cards, activeId, +1))],
+      ["mod+1", () => activate(getNumericTargetId(cards, 1))],
+      ["mod+2", () => activate(getNumericTargetId(cards, 2))],
+      ["mod+3", () => activate(getNumericTargetId(cards, 3))],
+      ["mod+4", () => activate(getNumericTargetId(cards, 4))],
+      ["mod+5", () => activate(getNumericTargetId(cards, 5))],
+      ["mod+6", () => activate(getNumericTargetId(cards, 6))],
+      ["mod+7", () => activate(getNumericTargetId(cards, 7))],
+      ["mod+8", () => activate(getNumericTargetId(cards, 8))],
+      ["mod+9", () => activate(getNumericTargetId(cards, 9))],
+    ],
+    [],
+  );
 
   return (
     // Tabs wraps the entire AppShell so that Tabs.List (inside AppShell.Navbar)
