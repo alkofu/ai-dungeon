@@ -8,10 +8,20 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 
 ## Key Features
 
-- **Multi-workspace layout** — organize AI CLI sessions per project or per agent.
+- **Card-as-tab terminals** — each card in the sidebar is a vertical tab; clicking it switches which terminal is visible in the main pane. PTY sessions are preserved across switches — the shell keeps running and scrollback is intact even when a tab is not visible.
 - **Multiple AI CLIs in one place** — designed to host tools like Claude Code, OpenCode, and other terminal-based AI assistants.
 - **Native desktop app** — built on Tauri v2 for a fast, lightweight shell around a modern web UI.
 - **Secure by default** — restrictive Content Security Policy and minimal Tauri capabilities out of the box. See [docs/security.md](docs/security.md).
+
+## UI Overview
+
+The app uses a three-part Mantine `AppShell`:
+
+- **Header** — app title and navbar toggle.
+- **Navbar (left sidebar)** — a "Cards" section with a `+` button to add cards. Each card is a `Tabs.Tab`; clicking it activates the corresponding terminal. A small `×` button on each tab removes the card and kills its PTY session.
+- **Main pane** — one `Tabs.Panel` per card, each containing an xterm.js terminal connected to a real shell via Tauri IPC. Inactive panels are hidden with CSS (`display: none`) but remain mounted, keeping their PTY sessions alive.
+
+When there are no cards, the main pane shows an empty-state prompt and the sidebar shows "No cards yet".
 
 ## Quick Start
 
