@@ -270,7 +270,7 @@ Field reference:
 - `windows` — list of window labels this capability applies to. `"main"` is the only window in this project.
 - `permissions` — list of Tauri permission identifiers. `core:default` enables the standard Tauri core APIs; `core:event:default` enables the event system used by `listen()`.
 
-**If a frontend `invoke()` call fails with a permission/capability error**, the fix is almost always to add a permission string to the `permissions` array — not to change Rust code. For example, adding shell open support would require `"shell:allow-open"`. In this repo's current state, adding a plain command handler typically does not require capability changes — `core:default` covers the standard invoke path. The exception is commands that expose a new API surface (filesystem, shell, dialog, etc.); those need a matching permission string.
+**If a frontend `invoke()` call fails with a permission/capability error**, the fix is almost always to add a permission string to the `permissions` array — not to change Rust code. For example, adding shell open support would require `"shell:allow-open"`. In this repo's current state, adding a plain command handler typically does not require capability changes — `core:default` covers the standard invoke path, and `core:event:default` (already present) covers any new app-emitted events. The exception is commands that expose a new API surface (filesystem, shell, dialog, etc.); those need a matching permission string.
 
 You may create additional capability files (e.g., `src-tauri/capabilities/shell.json`) for logical grouping, but must keep the `$schema` path correct relative to the new file's location.
 
@@ -353,8 +353,9 @@ When a command, event, or capability issue is unclear, work through these source
 
 1. **Rust compiler errors** — `cargo` output in the `pnpm tauri dev` terminal. Trait missing, type mismatch, and registration errors surface here first.
 2. **Tauri runtime error text** — the error string returned to the TypeScript `invoke()` call (or logged to the webview DevTools console). "command not found" and capability denial messages appear here.
-3. **Existing repo patterns in `pty.rs` and `lib.rs`** — the live implementation is the authoritative example. If the skill and the codebase disagree, follow the codebase.
-4. **Capability JSON** — `src-tauri/capabilities/default.json` is the last stop for permission-related failures. Add a permission string here only after the above three sources have been checked.
+3. **Argument key casing** — if the Rust handler returns a deserialisation error or receives a `null`/missing argument, check that all TypeScript `invoke()` argument keys are camelCase versions of the Rust snake_case parameter names (see Failure Mode #2). This is the highest-frequency failure in this project.
+4. **Existing repo patterns in `pty.rs` and `lib.rs`** — the live implementation is the authoritative example. If the skill and the codebase disagree, follow the codebase.
+5. **Capability JSON** — `src-tauri/capabilities/default.json` is the last stop for permission-related failures. Add a permission string here only after the above three sources have been checked.
 
 ## Output Expectations
 
