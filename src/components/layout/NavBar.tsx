@@ -1,6 +1,6 @@
-import type React from "react";
 import { ActionIcon, Group, Tabs, Text, Title } from "@mantine/core";
 import type { Card } from "../../types/card";
+import { SessionCard } from "./SessionCard";
 
 interface NavBarProps {
   cards: Card[];
@@ -28,37 +28,7 @@ export function NavBar({ cards, onAddCard, onRemoveCard }: NavBarProps) {
         <Tabs.List>
           {cards.map((card) => (
             <Tabs.Tab key={card.id} value={card.id}>
-              <Group justify="space-between" wrap="nowrap">
-                <Text size="sm">Card {card.id.slice(0, 8)}</Text>
-                {/* component="div" avoids nesting <button> inside <button>
-                    (Tabs.Tab renders as <button>; CloseButton also renders as
-                    <button> by default, which is invalid HTML). Using a div
-                    with role="button" keeps the accessible name and click
-                    behaviour while producing valid HTML. */}
-                <ActionIcon
-                  component="div"
-                  role="button"
-                  aria-label={`Remove card ${card.id.slice(0, 8)}`}
-                  variant="subtle"
-                  size="xs"
-                  tabIndex={0}
-                  onClick={(event: React.MouseEvent) => {
-                    // Stop the click from bubbling to the Tabs.Tab, which would
-                    // briefly activate the deleted tab before the card is removed.
-                    event.stopPropagation();
-                    onRemoveCard(card.id);
-                  }}
-                  onKeyDown={(e: React.KeyboardEvent) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onRemoveCard(card.id);
-                    }
-                  }}
-                >
-                  ×
-                </ActionIcon>
-              </Group>
+              <SessionCard cardId={card.id} onRemove={onRemoveCard} />
             </Tabs.Tab>
           ))}
         </Tabs.List>
