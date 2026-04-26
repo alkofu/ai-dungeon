@@ -257,8 +257,27 @@ pub async fn pty_spawn(
             }
             return Err(e);
         }
-        Ok((master, writer, child, reader)) => {
+        Ok((master, mut writer, child, reader)) => {
             let shutdown = Arc::new(AtomicBool::new(false));
+
+            // Inject the shell init polyglot on Unix so bash/zsh emit OSC 7 (CWD) and
+            // OSC 7337 (git context) after every prompt cycle. We write to the bare
+            // `writer` binding here — before it is wrapped in `Arc<Mutex<>>` and inserted
+            // into the map — so the write is uncontended and cannot race with `pty_write`,
+            // `pty_kill`, or a remount-spawn on the same sid (the session is still
+            // unreachable from any other code path at this point).
+            //
+            // Soft failure: on write or flush error we log and proceed. A terminal without
+            // OSC context is preferable to a failed `pty_spawn`. This matches the
+            // behaviour shipped in commit 5b64097 prior to the lifecycle refactor.
+            #[cfg(unix)]
+            {
+                if let Err(e) = writer.write_all(SHELL_INIT_POLYGLOT.as_bytes()) {
+                    eprintln!("[ai-dungeon] shell init injection write failed: {e}");
+                } else if let Err(e) = writer.flush() {
+                    eprintln!("[ai-dungeon] shell init injection flush failed: {e}");
+                }
+            }
 
             // Replace the Reserved placeholder with the fully-constructed Active session.
             let session = Arc::new(PtySession {
