@@ -45,5 +45,7 @@ export default defineConfig({
 
   optimizeDeps: {
     include: ["@xterm/xterm", "@xterm/addon-fit"],
+    // Workaround: @tabler/icons-react causes Vite dev-server chunk explosion (~23k pre-bundled chunks). Exclude from optimizeDeps. Production builds are unaffected.
+    exclude: ["@tabler/icons-react"],
   },
 });
