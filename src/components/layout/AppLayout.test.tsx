@@ -130,8 +130,8 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId={null}
         onActiveIdChange={vi.fn()}
-        claudeContext={{}}
-        onClaudeContextChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
       />,
@@ -161,8 +161,8 @@ describe("AppLayout", () => {
             onRemoveCard={vi.fn()}
             activeId="A"
             onActiveIdChange={vi.fn()}
-            claudeContext={{}}
-            onClaudeContextChange={vi.fn()}
+            sessionContext={{}}
+            onSessionContextChange={vi.fn()}
             shellContext={{}}
             onShellContextChange={vi.fn()}
           />
@@ -208,8 +208,8 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId="card-1"
         onActiveIdChange={vi.fn()}
-        claudeContext={{}}
-        onClaudeContextChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
       />,
@@ -228,8 +228,8 @@ describe("AppLayout", () => {
           onRemoveCard={vi.fn()}
           activeId="card-1"
           onActiveIdChange={vi.fn()}
-          claudeContext={{}}
-          onClaudeContextChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
         />,
@@ -284,8 +284,8 @@ describe("AppLayout — keyboard navigation", () => {
         onRemoveCard={vi.fn()}
         activeId={activeId}
         onActiveIdChange={onActiveIdChange}
-        claudeContext={{}}
-        onClaudeContextChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
       />,

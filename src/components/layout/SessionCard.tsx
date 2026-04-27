@@ -1,19 +1,19 @@
 import type React from "react";
 import { ActionIcon, Badge, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconCircleDot, IconGitPullRequest } from "@tabler/icons-react";
-import type { ClaudeContext, ShellContext } from "../../types/session";
-import { getMockClaudeContext } from "./claudeContext.mock";
+import type { SessionContext, ShellContext } from "../../types/session";
+import { getMockSessionContext } from "./sessionContext.mock";
 
-function isClaudeContext(m: ClaudeContext | ShellContext): m is ClaudeContext {
-  return "slug" in m && typeof (m as ClaudeContext).slug === "string";
+function isSessionContext(m: SessionContext | ShellContext): m is SessionContext {
+  return "slug" in m && typeof (m as SessionContext).slug === "string";
 }
 
 interface SessionCardProps {
   cardId: string;
   onRemove: (id: string) => void;
-  /** OSC 6800 (Claude) context — authoritative when present. */
-  claudeContext?: ClaudeContext;
-  /** OSC 7/7337 (shell) context — used when no Claude context is present. */
+  /** OSC 6800 session context — authoritative when present. */
+  sessionContext?: SessionContext;
+  /** OSC 7/7337 (shell) context — used when no session context is present. */
   shellContext?: ShellContext;
 }
 
@@ -30,20 +30,20 @@ function lastSegments(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-export function SessionCard({ cardId, onRemove, claudeContext, shellContext }: SessionCardProps) {
-  // Intentional: OSC 7337 clear does not erase branch/repo on a Claude-bound card.
-  // ClaudeContext is authoritative over transient shell drift.
-  const meta = claudeContext ?? shellContext ?? getMockClaudeContext(cardId);
-  // prNumber and issueNumber only exist on ClaudeContext (Claude slot), not ShellContext.
-  const prNumber = isClaudeContext(meta) ? meta.prNumber : undefined;
-  const issueNumber = isClaudeContext(meta) ? meta.issueNumber : undefined;
+export function SessionCard({ cardId, onRemove, sessionContext, shellContext }: SessionCardProps) {
+  // Intentional: OSC 7337 clear does not erase branch/repo on a session-bound card.
+  // SessionContext is authoritative over transient shell drift.
+  const meta = sessionContext ?? shellContext ?? getMockSessionContext(cardId);
+  // prNumber and issueNumber only exist on SessionContext (OSC 6800 slot), not ShellContext.
+  const prNumber = isSessionContext(meta) ? meta.prNumber : undefined;
+  const issueNumber = isSessionContext(meta) ? meta.issueNumber : undefined;
 
   return (
     <Stack gap="xs">
       {/* Row 1: slug + close button */}
       <Group justify="space-between" wrap="nowrap">
         <Text size="sm" fw={700}>
-          {isClaudeContext(meta) ? meta.slug : "(shell)"}
+          {isSessionContext(meta) ? meta.slug : "(shell)"}
         </Text>
         {/* component="div" avoids nesting <button> inside <button>
             (Tabs.Tab renders as <button>; ActionIcon renders as <button> by default,

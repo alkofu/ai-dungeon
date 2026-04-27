@@ -545,7 +545,10 @@ describe("Terminal", () => {
 
   it("calls term.parser.registerOscHandler with 6800 and a function on mount", async () => {
     renderWithProviders(
-      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onClaudeContextChange={vi.fn()} />,
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onSessionContextChange={vi.fn()}
+      />,
     );
     await vi.waitFor(() => {
       expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
@@ -562,12 +565,12 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC handler invoked with valid payload calls onClaudeContextChange once with parsed ClaudeContext", async () => {
-    const onClaudeContextChange = vi.fn();
+  it("OSC handler invoked with valid payload calls onSessionContextChange once with parsed SessionContext", async () => {
+    const onSessionContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onClaudeContextChange={onClaudeContextChange}
+        onSessionContextChange={onSessionContextChange}
       />,
     );
 
@@ -593,14 +596,14 @@ describe("Terminal", () => {
     // Handler must return true (consume the sequence).
     expect(result).toBe(true);
 
-    // Assert deferral: onClaudeContextChange must NOT be called synchronously
-    expect(onClaudeContextChange).not.toHaveBeenCalled();
+    // Assert deferral: onSessionContextChange must NOT be called synchronously
+    expect(onSessionContextChange).not.toHaveBeenCalled();
 
-    // onClaudeContextChange is called via queueMicrotask — wait for the microtask queue.
+    // onSessionContextChange is called via queueMicrotask — wait for the microtask queue.
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onClaudeContextChange).toHaveBeenCalledTimes(1);
-        expect(onClaudeContextChange).toHaveBeenCalledWith(
+        expect(onSessionContextChange).toHaveBeenCalledTimes(1);
+        expect(onSessionContextChange).toHaveBeenCalledWith(
           expect.objectContaining({
             sessionTs: "20260425-120000",
             slug: "smoke-test",
@@ -613,12 +616,12 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC handler invoked with malformed JSON does not call onClaudeContextChange", async () => {
-    const onClaudeContextChange = vi.fn();
+  it("OSC handler invoked with malformed JSON does not call onSessionContextChange", async () => {
+    const onSessionContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onClaudeContextChange={onClaudeContextChange}
+        onSessionContextChange={onSessionContextChange}
       />,
     );
 
@@ -634,7 +637,7 @@ describe("Terminal", () => {
 
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onClaudeContextChange).not.toHaveBeenCalled();
+        expect(onSessionContextChange).not.toHaveBeenCalled();
         resolve();
       });
     });
@@ -642,7 +645,10 @@ describe("Terminal", () => {
 
   it("OSC handler returns true", async () => {
     renderWithProviders(
-      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onClaudeContextChange={vi.fn()} />,
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onSessionContextChange={vi.fn()}
+      />,
     );
 
     await vi.waitFor(() => {
@@ -1082,7 +1088,10 @@ describe("Terminal", () => {
 
   it("disposes OSC 6800, OSC 7, and OSC 7337 handlers on unmount before term.dispose()", async () => {
     const { unmount } = renderWithProviders(
-      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onClaudeContextChange={vi.fn()} />,
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onSessionContextChange={vi.fn()}
+      />,
     );
 
     // Wait for OSC handlers to be registered (they are inside the font-load IIFE).

@@ -1,14 +1,14 @@
 import { useCallback, useReducer } from "react";
 import { AppLayout } from "./components/layout";
 import type { Card } from "./types/card";
-import type { ClaudeContext, ShellContext } from "./types/session";
+import type { SessionContext, ShellContext } from "./types/session";
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
 export interface AppState {
   cards: Card[];
   activeId: string | null;
-  claudeContext: Record<string, ClaudeContext>;
+  sessionContext: Record<string, SessionContext>;
   shellContext: Record<string, ShellContext>;
 }
 
@@ -18,7 +18,7 @@ type AppAction =
   | { type: "add" }
   | { type: "remove"; id: string }
   | { type: "activate"; id: string | null }
-  | { type: "setClaudeContext"; id: string; ctx: ClaudeContext }
+  | { type: "setSessionContext"; id: string; ctx: SessionContext }
   | { type: "setShellContext"; id: string; ctx: ShellContext };
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         cards: [...state.cards, newCard],
         // Always activate the newly added card — conventional UX for terminal apps.
         activeId: newCard.id,
-        claudeContext: state.claudeContext,
+        sessionContext: state.sessionContext,
         shellContext: state.shellContext,
       };
     }
@@ -55,9 +55,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         }
       }
 
-      // Remove the card's Claude context to avoid leaking memory across long sessions.
+      // Remove the card's session context to avoid leaking memory across long sessions.
       // Use object destructuring rather than `delete` to keep the reducer pure.
-      const { [action.id]: _removed, ...remainingClaudeContext } = state.claudeContext;
+      const { [action.id]: _removed, ...remainingSessionContext } = state.sessionContext;
       void _removed;
 
       // Also remove the card's shell context.
@@ -67,7 +67,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         cards: remaining,
         activeId: nextActiveId,
-        claudeContext: remainingClaudeContext,
+        sessionContext: remainingSessionContext,
         shellContext: remainingShellContext,
       };
     }
@@ -77,13 +77,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
       return { ...state, activeId: action.id };
     }
-    case "setClaudeContext": {
+    case "setSessionContext": {
       // No-op if the card is not in state.cards — guards against a race where
       // the OSC handler fires after the card is removed (before dispose).
       if (!state.cards.some((c) => c.id === action.id)) return state;
       return {
         ...state,
-        claudeContext: { ...state.claudeContext, [action.id]: action.ctx },
+        sessionContext: { ...state.sessionContext, [action.id]: action.ctx },
       };
     }
     case "setShellContext": {
@@ -100,7 +100,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-const initialState: AppState = { cards: [], activeId: null, claudeContext: {}, shellContext: {} };
+const initialState: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -121,8 +121,8 @@ export function App() {
     dispatch({ type: "activate", id: value });
   }, []);
 
-  const setClaudeContext = useCallback((id: string, ctx: ClaudeContext) => {
-    dispatch({ type: "setClaudeContext", id, ctx });
+  const setSessionContext = useCallback((id: string, ctx: SessionContext) => {
+    dispatch({ type: "setSessionContext", id, ctx });
   }, []);
 
   const setShellContext = useCallback((id: string, ctx: ShellContext) => {
@@ -136,8 +136,8 @@ export function App() {
       onActiveIdChange={setActiveId}
       onAddCard={addCard}
       onRemoveCard={removeCard}
-      claudeContext={state.claudeContext}
-      onClaudeContextChange={setClaudeContext}
+      sessionContext={state.sessionContext}
+      onSessionContextChange={setSessionContext}
       shellContext={state.shellContext}
       onShellContextChange={setShellContext}
     />

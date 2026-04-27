@@ -4,22 +4,22 @@ import { act } from "@testing-library/react";
 import { renderWithProviders } from "./test-utils/render";
 import { App, appReducer } from "./App";
 import type { AppState } from "./App";
-import type { ClaudeContext, ShellContext } from "./types/session";
+import type { SessionContext, ShellContext } from "./types/session";
 import { invoke } from "@tauri-apps/api/core";
 
 // Capture the latest callbacks passed to the Terminal mock so
 // integration tests can fire OSC context changes through the full plumbing.
-let capturedOnClaudeContextChange: ((ctx: ClaudeContext) => void) | undefined;
+let capturedOnSessionContextChange: ((ctx: SessionContext) => void) | undefined;
 let capturedOnShellContextChange: ((ctx: ShellContext) => void) | undefined;
 
 vi.mock("./components/Terminal/Terminal", () => ({
   Terminal: vi.fn(
     (props: {
       sessionId?: string;
-      onClaudeContextChange?: (ctx: ClaudeContext) => void;
+      onSessionContextChange?: (ctx: SessionContext) => void;
       onShellContextChange?: (ctx: ShellContext) => void;
     }) => {
-      capturedOnClaudeContextChange = props.onClaudeContextChange;
+      capturedOnSessionContextChange = props.onSessionContextChange;
       capturedOnShellContextChange = props.onShellContextChange;
       // Render the sentinel div so existing tests that query terminal-root continue to work.
       return <div data-testid="terminal-root" />;
@@ -73,7 +73,7 @@ type AnyMock = ReturnType<typeof vi.fn>;
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedOnClaudeContextChange = undefined;
+    capturedOnSessionContextChange = undefined;
     capturedOnShellContextChange = undefined;
     (invoke as unknown as AnyMock).mockResolvedValue(undefined);
 
@@ -277,15 +277,15 @@ describe("App", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("SessionCard row-2 updates when the Terminal's onClaudeContextChange callback fires", async () => {
+  it("SessionCard row-2 updates when the Terminal's onSessionContextChange callback fires", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
 
-    // Fire the onClaudeContextChange callback captured from the Terminal mock.
+    // Fire the onSessionContextChange callback captured from the Terminal mock.
     await act(async () => {
-      capturedOnClaudeContextChange?.({
+      capturedOnSessionContextChange?.({
         sessionTs: "20260425-120000",
         slug: "backend-service",
         workingDirectory: "/home/user/project/backend-service",
@@ -298,13 +298,13 @@ describe("App", () => {
     expect(screen.getByText("backend-service")).toBeInTheDocument();
   });
 
-  it("setShellContext populates state.shellContext[id] independently of state.claudeContext[id]", async () => {
+  it("setShellContext populates state.shellContext[id] independently of state.sessionContext[id]", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
 
-    // Fire onShellContextChange — should NOT affect claudeContext.
+    // Fire onShellContextChange — should NOT affect sessionContext.
     await act(async () => {
       capturedOnShellContextChange?.({
         workingDirectory: "/shell/path",
@@ -312,9 +312,9 @@ describe("App", () => {
       });
     });
 
-    // No claudeContext is set, so SessionCard falls back to shellContext, which
+    // No sessionContext is set, so SessionCard falls back to shellContext, which
     // produces "(shell)" as the slug placeholder. This proves that shellContext
-    // is used independently of claudeContext and that state independence is maintained.
+    // is used independently of sessionContext and that state independence is maintained.
     expect(screen.getByText("(shell)")).toBeInTheDocument();
   });
 });
@@ -325,24 +325,24 @@ describe("appReducer", () => {
     const state: AppState = {
       cards: [card],
       activeId: "test-uuid-1",
-      claudeContext: {},
+      sessionContext: {},
       shellContext: {},
     };
     expect(appReducer(state, { type: "activate", id: null })).toBe(state); // referential equality
   });
 
   it("activate accepts null when no cards exist", () => {
-    const state: AppState = { cards: [], activeId: null, claudeContext: {}, shellContext: {} };
+    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
     const result = appReducer(state, { type: "activate", id: null });
-    expect(result).toEqual({ cards: [], activeId: null, claudeContext: {}, shellContext: {} });
+    expect(result).toEqual({ cards: [], activeId: null, sessionContext: {}, shellContext: {} });
   });
 
-  it("setClaudeContext stores ctx keyed by card id", () => {
+  it("setSessionContext stores ctx keyed by card id", () => {
     const card = { id: "card-1" };
     const state: AppState = {
       cards: [card],
       activeId: "card-1",
-      claudeContext: {},
+      sessionContext: {},
       shellContext: {},
     };
     const ctx = {
@@ -352,19 +352,19 @@ describe("appReducer", () => {
       branch: "main",
       repo: { owner: "acme", name: "widgets" },
     };
-    const result = appReducer(state, { type: "setClaudeContext", id: "card-1", ctx });
-    expect(result.claudeContext["card-1"]).toEqual(ctx);
+    const result = appReducer(state, { type: "setSessionContext", id: "card-1", ctx });
+    expect(result.sessionContext["card-1"]).toEqual(ctx);
   });
 
-  it("setClaudeContext: overwrites existing context when same card emits OSC again", () => {
-    const firstCtx: ClaudeContext = {
+  it("setSessionContext: overwrites existing context when same card emits OSC again", () => {
+    const firstCtx: SessionContext = {
       sessionTs: "20260401-120000",
       slug: "first-slug",
       workingDirectory: "/tmp",
       branch: "main",
       repo: { owner: "acme", name: "widgets" },
     };
-    const secondCtx: ClaudeContext = {
+    const secondCtx: SessionContext = {
       sessionTs: "20260401-130000",
       slug: "second-slug",
       workingDirectory: "/tmp",
@@ -372,21 +372,21 @@ describe("appReducer", () => {
       repo: { owner: "acme", name: "widgets" },
     };
     const stateAfterFirst = appReducer(
-      { cards: [{ id: "card-1" }], activeId: null, claudeContext: {}, shellContext: {} },
-      { type: "setClaudeContext", id: "card-1", ctx: firstCtx },
+      { cards: [{ id: "card-1" }], activeId: null, sessionContext: {}, shellContext: {} },
+      { type: "setSessionContext", id: "card-1", ctx: firstCtx },
     );
     const stateAfterSecond = appReducer(stateAfterFirst, {
-      type: "setClaudeContext",
+      type: "setSessionContext",
       id: "card-1",
       ctx: secondCtx,
     });
-    expect(stateAfterSecond.claudeContext["card-1"]).toEqual(secondCtx);
+    expect(stateAfterSecond.sessionContext["card-1"]).toEqual(secondCtx);
     // second value fully replaces first — no field bleeding
-    expect(stateAfterSecond.claudeContext["card-1"].sessionTs).toBe("20260401-130000");
+    expect(stateAfterSecond.sessionContext["card-1"].sessionTs).toBe("20260401-130000");
   });
 
-  it("setClaudeContext is a no-op if card id is not in state.cards", () => {
-    const state: AppState = { cards: [], activeId: null, claudeContext: {}, shellContext: {} };
+  it("setSessionContext is a no-op if card id is not in state.cards", () => {
+    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
     const ctx = {
       sessionTs: "20260425-120000",
       slug: "test",
@@ -394,11 +394,11 @@ describe("appReducer", () => {
       branch: "main",
       repo: { owner: "acme", name: "widgets" },
     };
-    const result = appReducer(state, { type: "setClaudeContext", id: "ghost-id", ctx });
+    const result = appReducer(state, { type: "setSessionContext", id: "ghost-id", ctx });
     expect(result).toBe(state); // referential equality — no-op
   });
 
-  it("remove cleans up claudeContext for the removed card", () => {
+  it("remove cleans up sessionContext for the removed card", () => {
     const card = { id: "card-1" };
     const ctx = {
       sessionTs: "20260425-120000",
@@ -410,18 +410,18 @@ describe("appReducer", () => {
     const state: AppState = {
       cards: [card],
       activeId: "card-1",
-      claudeContext: { "card-1": ctx },
+      sessionContext: { "card-1": ctx },
       shellContext: {},
     };
     const result = appReducer(state, { type: "remove", id: "card-1" });
-    expect(result.claudeContext).not.toHaveProperty("card-1");
+    expect(result.sessionContext).not.toHaveProperty("card-1");
   });
 
   it("setShellContext stores ShellContext keyed by card id", () => {
     const state: AppState = {
       cards: [{ id: "card-1" }],
       activeId: "card-1",
-      claudeContext: {},
+      sessionContext: {},
       shellContext: {},
     };
     const ctx: ShellContext = { workingDirectory: "/home/user", branch: "main" };
@@ -430,7 +430,7 @@ describe("appReducer", () => {
   });
 
   it("setShellContext is a no-op if card id is not in state.cards", () => {
-    const state: AppState = { cards: [], activeId: null, claudeContext: {}, shellContext: {} };
+    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
     const ctx: ShellContext = { workingDirectory: "/home/user" };
     const result = appReducer(state, { type: "setShellContext", id: "ghost-id", ctx });
     expect(result).toBe(state); // referential equality — no-op
@@ -442,7 +442,7 @@ describe("appReducer", () => {
     const state: AppState = {
       cards: [{ id: "card-1" }],
       activeId: "card-1",
-      claudeContext: {},
+      sessionContext: {},
       shellContext: { "card-1": firstCtx },
     };
     const result = appReducer(state, { type: "setShellContext", id: "card-1", ctx: secondCtx });
@@ -456,7 +456,7 @@ describe("appReducer", () => {
     const state: AppState = {
       cards: [{ id: "card-1" }],
       activeId: "card-1",
-      claudeContext: {},
+      sessionContext: {},
       shellContext: { "card-1": ctx },
     };
     const result = appReducer(state, { type: "remove", id: "card-1" });

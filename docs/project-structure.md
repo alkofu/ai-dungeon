@@ -16,7 +16,7 @@ ai-dungeon/
 │   ├── App.tsx       # Root component — useReducer for cards + activeId; owns tab state
 │   ├── types/
 │   │   ├── card.ts               # Card type ({ id: string })
-│   │   ├── session.ts            # ClaudeContext (OSC 6800) and ShellContext (OSC 7/7337) interfaces; all values are UNTRUSTED. branch and repo are optional on both types (cleared by empty OSC 7337).
+│   │   ├── session.ts            # SessionContext (OSC 6800) and ShellContext (OSC 7/7337) interfaces; all values are UNTRUSTED. branch and repo are optional on both types (cleared by empty OSC 7337).
 │   │   ├── sessionPayload.ts     # parseSessionContextPayload() / parseOsc7Payload() / parseOsc7337Payload() — validate all inbound OSC payloads before they enter app state. Single audit entry point for OSC 6800, OSC 7, and OSC 7337.
 │   │   └── sessionPayload.test.ts
 │   └── components/
@@ -25,11 +25,11 @@ ai-dungeon/
 │       │   ├── index.ts       # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — threads claudeContext + shellContext + their change callbacks to NavBar and Terminal
-│           ├── NavBar.tsx             # Sidebar — passes per-card claudeContext and shellContext to each SessionCard
-│           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: claudeContext ?? shellContext ?? mock
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — threads sessionContext + shellContext + their change callbacks to NavBar and Terminal
+│           ├── NavBar.tsx             # Sidebar — passes per-card sessionContext and shellContext to each SessionCard
+│           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
-│           ├── claudeContext.mock.ts  # Deterministic mock ClaudeContext fixtures keyed by card id
+│           ├── sessionContext.mock.ts  # Deterministic mock SessionContext fixtures keyed by card id
 │           └── index.ts              # Barrel export
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
@@ -86,10 +86,10 @@ For historical context and the full design rationale, see issue #32.
 
 The app uses a two-slot card context model. Each tab card independently accumulates context from two sources:
 
-- **ClaudeContext** (OSC 6800) — full session snapshot emitted by an AI CLI. Contains slug, workingDirectory, branch, repo, prNumber, issueNumber.
+- **SessionContext** (OSC 6800) — full session snapshot emitted by an AI CLI. Contains slug, workingDirectory, branch, repo, prNumber, issueNumber.
 - **ShellContext** (OSC 7 / OSC 7337) — shell-derived context: workingDirectory from OSC 7 (`file://` URI) and branch/repo from OSC 7337.
 
-Rendering precedence in `SessionCard.tsx`: `claudeContext ?? shellContext ?? getMockClaudeContext(cardId)`.
+Rendering precedence in `SessionCard.tsx`: `sessionContext ?? shellContext ?? getMockSessionContext(cardId)`.
 
 An AI CLI emits OSC 6800 like this:
 
@@ -100,9 +100,9 @@ An AI CLI emits OSC 6800 like this:
 The data travels through the following layers:
 
 1. **PTY** — the CLI process writes the sequence to its stdout.
-2. **`Terminal.tsx`** — xterm.js intercepts OSC 6800, OSC 7, and OSC 7337. The 6800 handler dispatches a full ClaudeContext via `onClaudeContextChange`; the 7 and 7337 handlers accumulate a ShellContext in `lastShellContextRef` and dispatch via `onShellContextChange`. Each handler delegates parsing to a dedicated parser in `sessionPayload.ts`, then wraps the dispatch in `queueMicrotask` to avoid re-entering the parser synchronously. The handlers are cleaned up on component unmount.
-3. **`parseSessionContextPayload()` / `parseOsc7Payload()` / `parseOsc7337Payload()` (`src/types/sessionPayload.ts`)** — single audit entry point for all OSC payload validation. Returns `ClaudeContext` / `ShellContext | null` / partial updates / null respectively. Never throw.
-4. **`App.tsx` reducer** — `setClaudeContext` stores a validated ClaudeContext in `AppState.claudeContext[id]` (full replacement). `setShellContext` stores a validated ShellContext in `AppState.shellContext[id]` (full replacement). Both are no-ops if the card id is not in `state.cards` — guards against races where an OSC handler fires after the card is removed.
-5. **`SessionCard.tsx`** — applies the `claudeContext ?? shellContext ?? mock` precedence. ClaudeContext is authoritative: an empty OSC 7337 clear does not erase branch/repo on a Claude-bound card.
+2. **`Terminal.tsx`** — xterm.js intercepts OSC 6800, OSC 7, and OSC 7337. The 6800 handler dispatches a full SessionContext via `onSessionContextChange`; the 7 and 7337 handlers accumulate a ShellContext in `lastShellContextRef` and dispatch via `onShellContextChange`. Each handler delegates parsing to a dedicated parser in `sessionPayload.ts`, then wraps the dispatch in `queueMicrotask` to avoid re-entering the parser synchronously. The handlers are cleaned up on component unmount.
+3. **`parseSessionContextPayload()` / `parseOsc7Payload()` / `parseOsc7337Payload()` (`src/types/sessionPayload.ts`)** — single audit entry point for all OSC payload validation. Returns `SessionContext` / `ShellContext | null` / partial updates / null respectively. Never throw.
+4. **`App.tsx` reducer** — `setSessionContext` stores a validated SessionContext in `AppState.sessionContext[id]` (full replacement). `setShellContext` stores a validated ShellContext in `AppState.shellContext[id]` (full replacement). Both are no-ops if the card id is not in `state.cards` — guards against races where an OSC handler fires after the card is removed.
+5. **`SessionCard.tsx`** — applies the `sessionContext ?? shellContext ?? mock` precedence. SessionContext is authoritative: an empty OSC 7337 clear does not erase branch/repo on a session-bound card.
 
-All `ClaudeContext` and `ShellContext` fields are treated as untrusted user-controlled data and must only be rendered as text. See [security.md](security.md) for the rendering constraint. For the full OSC field specification, see [osc-protocol.md](osc-protocol.md).
+All `SessionContext` and `ShellContext` fields are treated as untrusted user-controlled data and must only be rendered as text. See [security.md](security.md) for the rendering constraint. For the full OSC field specification, see [osc-protocol.md](osc-protocol.md).

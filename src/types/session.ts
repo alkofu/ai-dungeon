@@ -1,10 +1,10 @@
 /**
- * Claude context populated by OSC 6800 (full payload). All fields are
+ * Session context populated by OSC 6800 (full payload). All fields are
  * UNTRUSTED — any process in the terminal can emit these. Fields must only be
  * rendered as text (never dangerouslySetInnerHTML, never passed to a shell
  * command or document.title assignment). `branch` and `repo` are optional.
  */
-export interface ClaudeContext {
+export interface SessionContext {
   sessionTs: string;
   slug: string;
   workingDirectory: string;
@@ -29,11 +29,11 @@ export interface ShellContext {
 }
 
 /**
- * Aggregate card context: either slot may be present. `claudeContext` wins
- * over `shellContext` for display purposes (ClaudeContext is authoritative
+ * Aggregate card context: either slot may be present. `sessionContext` wins
+ * over `shellContext` for display purposes (SessionContext is authoritative
  * over transient shell drift). A mock is shown when neither slot is populated.
  */
 export interface CardContext {
-  claudeContext?: ClaudeContext;
+  sessionContext?: SessionContext;
   shellContext?: ShellContext;
 }

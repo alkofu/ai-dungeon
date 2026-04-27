@@ -2,7 +2,7 @@ import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
 import type { Card } from "../../types/card";
-import type { ClaudeContext, ShellContext } from "../../types/session";
+import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
 
@@ -15,8 +15,8 @@ interface AppLayoutProps {
   onRemoveCard: (id: string) => void;
   activeId: string | null;
   onActiveIdChange: (value: string | null) => void;
-  claudeContext: Record<string, ClaudeContext>;
-  onClaudeContextChange: (id: string, ctx: ClaudeContext) => void;
+  sessionContext: Record<string, SessionContext>;
+  onSessionContextChange: (id: string, ctx: SessionContext) => void;
   shellContext: Record<string, ShellContext>;
   onShellContextChange: (id: string, ctx: ShellContext) => void;
 }
@@ -27,8 +27,8 @@ export function AppLayout({
   onRemoveCard,
   activeId,
   onActiveIdChange,
-  claudeContext,
-  onClaudeContextChange,
+  sessionContext,
+  onSessionContextChange,
   shellContext,
   onShellContextChange,
 }: AppLayoutProps) {
@@ -139,7 +139,7 @@ export function AppLayout({
             cards={cards}
             onAddCard={onAddCard}
             onRemoveCard={onRemoveCard}
-            claudeContext={claudeContext}
+            sessionContext={sessionContext}
             shellContext={shellContext}
           />
         </AppShell.Navbar>
@@ -159,7 +159,7 @@ export function AppLayout({
               <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
                 <Terminal
                   sessionId={card.id}
-                  onClaudeContextChange={(ctx) => onClaudeContextChange(card.id, ctx)}
+                  onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
                   onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
                 />
               </Tabs.Panel>

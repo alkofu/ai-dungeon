@@ -1,4 +1,4 @@
-import type { ClaudeContext } from "./session";
+import type { SessionContext } from "./session";
 
 /**
  * Wire-format JSON shape of an OSC 6800 payload emitted by the TPK toolkit.
@@ -45,18 +45,18 @@ function isValidPositiveInt(v: unknown): v is number {
 // ── Parser ────────────────────────────────────────────────────────────────────
 
 /**
- * Parses an OSC 6800 JSON payload into a `ClaudeContext` (the wire envelope uses
+ * Parses an OSC 6800 JSON payload into a `SessionContext` (the wire envelope uses
  * `SessionContextPayload` / `SESSION_TS` field names — these are preserved for
  * wire-format compatibility).
  *
- * Returns a `ClaudeContext` on success, or null if the payload is invalid.
+ * Returns a `SessionContext` on success, or null if the payload is invalid.
  * Never throws — all parse/validation errors are swallowed and logged in DEV.
  *
  * Validates OSC 6800 payloads. OSC 7 payloads are validated by `parseOsc7Payload`;
  * OSC 7337 payloads by `parseOsc7337Payload`. All three live in this module so that
  * there is a single audit entry point for all inbound OSC data.
  */
-export function parseSessionContextPayload(raw: string): ClaudeContext | null {
+export function parseSessionContextPayload(raw: string): SessionContext | null {
   // Guard 1: payload size — checked before JSON.parse to prevent DoS.
   if (raw.length > MAX_LENGTH) {
     if (import.meta.env.DEV) {

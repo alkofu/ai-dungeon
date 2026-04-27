@@ -23,7 +23,7 @@ describe("NavBar", () => {
         cards={[]}
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -38,7 +38,7 @@ describe("NavBar", () => {
         cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }, { id: "12345678" }]}
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -58,7 +58,7 @@ describe("NavBar", () => {
         cards={[]}
         onAddCard={onAddCard}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -78,7 +78,7 @@ describe("NavBar", () => {
         cards={[{ id: "a" }, { id: "b" }]}
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -98,7 +98,7 @@ describe("NavBar", () => {
         cards={[{ id: "a" }]}
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -120,7 +120,7 @@ describe("NavBar", () => {
         cards={[{ id: "a" }]}
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -154,7 +154,7 @@ describe("NavBar", () => {
         cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }]}
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
-        claudeContext={{}}
+        sessionContext={{}}
         shellContext={{}}
       />,
     );
@@ -188,7 +188,7 @@ describe("NavBar", () => {
           cards={[{ id: "a" }]}
           onAddCard={vi.fn()}
           onRemoveCard={onRemoveCard}
-          claudeContext={{}}
+          sessionContext={{}}
           shellContext={{}}
         />
       </Tabs>,

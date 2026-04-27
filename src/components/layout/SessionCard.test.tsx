@@ -4,7 +4,7 @@ import { vi } from "vitest";
 import { Tabs } from "@mantine/core";
 import { renderWithProviders } from "../../test-utils/render";
 import { SessionCard } from "./SessionCard";
-import { getMockClaudeContext, CLAUDE_CONTEXT_FIXTURES } from "./claudeContext.mock";
+import { getMockSessionContext, SESSION_CONTEXT_FIXTURES } from "./sessionContext.mock";
 import type { ShellContext } from "../../types/session";
 
 // Cards 1–5 are wrapped in Tabs context matching production rendering.
@@ -41,7 +41,7 @@ describe("SessionCard", () => {
 
   it("1. renders the slug from the mock fixture for the given cardId", () => {
     renderInTabs(CARD_ID_F0);
-    expect(screen.getByText(CLAUDE_CONTEXT_FIXTURES[0].slug)).toBeInTheDocument();
+    expect(screen.getByText(SESSION_CONTEXT_FIXTURES[0].slug)).toBeInTheDocument();
   });
 
   it("2. renders close button with correct aria-label and calls onRemove when clicked", async () => {
@@ -88,7 +88,7 @@ describe("SessionCard", () => {
     const user = userEvent.setup();
     renderInTabs(CARD_ID_F0);
 
-    const meta = CLAUDE_CONTEXT_FIXTURES[0];
+    const meta = SESSION_CONTEXT_FIXTURES[0];
     const trigger = screen.getByText(meta.repo!.name);
     await user.hover(trigger);
 
@@ -107,14 +107,14 @@ describe("SessionCard", () => {
     await user.hover(trigger);
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent(CLAUDE_CONTEXT_FIXTURES[1].workingDirectory);
+    expect(tooltip).toHaveTextContent(SESSION_CONTEXT_FIXTURES[1].workingDirectory);
   });
 
   it("8. working-directory visible text is last 1-2 segments", () => {
     // Fixture 1: "/home/user/work/backend-service/src/handlers" → "src/handlers"
     renderInTabs(CARD_ID_F1);
     expect(screen.getByText("src/handlers")).toBeInTheDocument();
-    expect(screen.queryByText(CLAUDE_CONTEXT_FIXTURES[1].workingDirectory)).toBeNull();
+    expect(screen.queryByText(SESSION_CONTEXT_FIXTURES[1].workingDirectory)).toBeNull();
   });
 
   it("9a. PR badge shows 'PR —' when prNumber is undefined", () => {
@@ -183,8 +183,8 @@ describe("SessionCard", () => {
 
   it("mock module is deterministic: same cardId returns deeply equal objects", () => {
     const id = "test-determinism-check";
-    const a = getMockClaudeContext(id);
-    const b = getMockClaudeContext(id);
+    const a = getMockSessionContext(id);
+    const b = getMockSessionContext(id);
     expect(a).toEqual(b);
   });
 
@@ -225,7 +225,7 @@ describe("SessionCard", () => {
           <SessionCard
             cardId="combined-card"
             onRemove={vi.fn()}
-            claudeContext={claudeCtx}
+            sessionContext={claudeCtx}
             shellContext={shellCtx}
           />
         </Tabs.Tab>
@@ -236,9 +236,9 @@ describe("SessionCard", () => {
     expect(screen.queryByText("shell-branch")).toBeNull();
   });
 
-  it("falls back to mock when neither claudeContext nor shellContext present", () => {
+  it("falls back to mock when neither sessionContext nor shellContext present", () => {
     renderInTabs(CARD_ID_F0);
-    const fixture = CLAUDE_CONTEXT_FIXTURES[0];
+    const fixture = SESSION_CONTEXT_FIXTURES[0];
     expect(screen.getByText(fixture.slug)).toBeInTheDocument();
   });
 
@@ -263,7 +263,7 @@ describe("SessionCard", () => {
           <SessionCard
             cardId="f2-card"
             onRemove={vi.fn()}
-            claudeContext={claudeCtx}
+            sessionContext={claudeCtx}
             shellContext={clearedShellCtx}
           />
         </Tabs.Tab>
@@ -275,17 +275,17 @@ describe("SessionCard", () => {
     expect(screen.getByText("claude-with-branch")).toBeInTheDocument();
   });
 
-  // ── claudeContext prop tests ──────────────────────────────────────────────
+  // ── sessionContext prop tests ──────────────────────────────────────────────
 
-  it("fallback: when claudeContext prop is omitted, renders slug/repo/branch from mock fixture", () => {
+  it("fallback: when sessionContext prop is omitted, renders slug/repo/branch from mock fixture", () => {
     renderInTabs(CARD_ID_F0);
-    const fixture = CLAUDE_CONTEXT_FIXTURES[0];
+    const fixture = SESSION_CONTEXT_FIXTURES[0];
     expect(screen.getByText(fixture.slug)).toBeInTheDocument();
     expect(screen.getByText(fixture.repo!.name)).toBeInTheDocument();
     expect(screen.getByText(fixture.branch!)).toBeInTheDocument();
   });
 
-  it("live: when claudeContext prop is provided, renders slug/repo/branch from prop (not mock)", () => {
+  it("live: when sessionContext prop is provided, renders slug/repo/branch from prop (not mock)", () => {
     const liveContext = {
       sessionTs: "20260425-120000",
       slug: "live-session",
@@ -298,7 +298,7 @@ describe("SessionCard", () => {
     const { unmount: unmountFirst } = renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value={CARD_ID_F0}>
-          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} claudeContext={liveContext} />
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionContext={liveContext} />
         </Tabs.Tab>
       </Tabs>,
     );
@@ -309,7 +309,7 @@ describe("SessionCard", () => {
     expect(screen.getByText("feat/live-branch")).toBeInTheDocument();
 
     // Mock fixture data must NOT appear.
-    const fixture = CLAUDE_CONTEXT_FIXTURES[0];
+    const fixture = SESSION_CONTEXT_FIXTURES[0];
     expect(screen.queryByText(fixture.slug)).toBeNull();
 
     unmountFirst();
@@ -325,7 +325,7 @@ describe("SessionCard", () => {
     const { unmount: unmountCleared } = renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value={CARD_ID_F0}>
-          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} claudeContext={clearedContext} />
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionContext={clearedContext} />
         </Tabs.Tab>
       </Tabs>,
     );
@@ -336,7 +336,7 @@ describe("SessionCard", () => {
     renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value={CARD_ID_F0}>
-          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} claudeContext={liveContext} />
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} sessionContext={liveContext} />
         </Tabs.Tab>
       </Tabs>,
     );

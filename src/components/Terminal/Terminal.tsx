@@ -41,7 +41,7 @@ import {
   parseOsc7Payload,
   parseOsc7337Payload,
 } from "../../types/sessionPayload";
-import type { ClaudeContext, ShellContext } from "../../types/session";
+import type { SessionContext, ShellContext } from "../../types/session";
 
 interface TerminalProps {
   // The caller supplies a stable UUID that identifies this PTY session. The
@@ -49,11 +49,11 @@ interface TerminalProps {
   // triggers a full unmount/re-spawn via the useEffect dependency array.
   sessionId: string;
   // Called whenever an OSC 6800 payload is received and successfully parsed.
-  // Fires with a fully-formed ClaudeContext (full replacement).
+  // Fires with a fully-formed SessionContext (full replacement).
   // Captured via a ref so the OSC handler always uses the latest version without
   // needing to be in the useEffect dependency array (which would restart the PTY
   // session on every re-render of the parent).
-  onClaudeContextChange?: (ctx: ClaudeContext) => void;
+  onSessionContextChange?: (ctx: SessionContext) => void;
   // Called whenever a ShellContext is assembled from OSC 7 / OSC 7337 payloads.
   // Fires with a fully-formed ShellContext (full replacement).
   onShellContextChange?: (ctx: ShellContext) => void;
@@ -94,7 +94,7 @@ export function _clearSpawnChainForTesting(): void {
 
 export function Terminal({
   sessionId,
-  onClaudeContextChange,
+  onSessionContextChange,
   onShellContextChange,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -103,8 +103,8 @@ export function Terminal({
   // version without adding them to the useEffect dependency array (which would
   // cause the effect — and therefore the PTY session — to restart every time the
   // parent re-renders). Assignments run on every render (component-top scope).
-  const onClaudeContextChangeRef = useRef(onClaudeContextChange);
-  onClaudeContextChangeRef.current = onClaudeContextChange;
+  const onSessionContextChangeRef = useRef(onSessionContextChange);
+  onSessionContextChangeRef.current = onSessionContextChange;
   const onShellContextChangeRef = useRef(onShellContextChange);
   onShellContextChangeRef.current = onShellContextChange;
 
@@ -355,7 +355,7 @@ export function Terminal({
       oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
         const ctx = parseSessionContextPayload(data);
         if (ctx) {
-          queueMicrotask(() => onClaudeContextChangeRef.current?.(ctx));
+          queueMicrotask(() => onSessionContextChangeRef.current?.(ctx));
         }
         return true;
       });

@@ -1,13 +1,13 @@
 import { ActionIcon, Group, Tabs, Text, Title } from "@mantine/core";
 import type { Card } from "../../types/card";
-import type { ClaudeContext, ShellContext } from "../../types/session";
+import type { SessionContext, ShellContext } from "../../types/session";
 import { SessionCard } from "./SessionCard";
 
 interface NavBarProps {
   cards: Card[];
   onAddCard: () => void;
   onRemoveCard: (id: string) => void;
-  claudeContext: Record<string, ClaudeContext>;
+  sessionContext: Record<string, SessionContext>;
   shellContext: Record<string, ShellContext>;
 }
 
@@ -15,7 +15,7 @@ export function NavBar({
   cards,
   onAddCard,
   onRemoveCard,
-  claudeContext,
+  sessionContext,
   shellContext,
 }: NavBarProps) {
   return (
@@ -59,7 +59,7 @@ export function NavBar({
               <SessionCard
                 cardId={card.id}
                 onRemove={onRemoveCard}
-                claudeContext={claudeContext[card.id]}
+                sessionContext={sessionContext[card.id]}
                 shellContext={shellContext[card.id]}
               />
             </Tabs.Tab>

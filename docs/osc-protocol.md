@@ -10,19 +10,19 @@ and OSC 7337 (git context) — and the two-slot card context model they feed int
 
 Each tab card holds two independent context slots:
 
-| Slot          | Source OSC | TypeScript type | Contents                             |
-| ------------- | ---------- | --------------- | ------------------------------------ |
-| ClaudeContext | 6800       | `ClaudeContext` | Full session snapshot from an AI CLI |
-| ShellContext  | 7 + 7337   | `ShellContext`  | Shell-derived CWD and git context    |
+| Slot           | Source OSC | TypeScript type  | Contents                             |
+| -------------- | ---------- | ---------------- | ------------------------------------ |
+| SessionContext | 6800       | `SessionContext` | Full session snapshot from an AI CLI |
+| ShellContext   | 7 + 7337   | `ShellContext`   | Shell-derived CWD and git context    |
 
 **Rendering precedence** in `SessionCard.tsx`:
 
 ```
-claudeContext ?? shellContext ?? getMockClaudeContext(cardId)
+sessionContext ?? shellContext ?? getMockSessionContext(cardId)
 ```
 
-ClaudeContext (OSC 6800) is authoritative when present. ShellContext (OSC 7/7337) fills
-the display when no Claude session is running. Mock fixtures are shown until either real
+SessionContext (OSC 6800) is authoritative when present. ShellContext (OSC 7/7337) fills
+the display when no AI CLI session is running. Mock fixtures are shown until either real
 slot is populated.
 
 ### TypeScript aggregate type
@@ -30,10 +30,10 @@ slot is populated.
 The full per-card context is represented in ai-dungeon's TypeScript codebase as:
 
 ```typescript
-CardContext { claudeContext?: ClaudeContext; shellContext?: ShellContext }
+CardContext { sessionContext?: SessionContext; shellContext?: ShellContext }
 ```
 
-The rendering rule is `claudeContext ?? shellContext ?? mock`. `CardContext` is defined in
+The rendering rule is `sessionContext ?? shellContext ?? mock`. `CardContext` is defined in
 `src/types/session.ts` and is the canonical aggregate for ai-tpk implementers who need to
 reason about the full per-card state.
 
@@ -57,21 +57,21 @@ Encoded as `\033]6800;<json>\007`.
 All fields are validated by `parseSessionContextPayload()` in `src/types/sessionPayload.ts`
 before entering app state. The payload must be valid JSON, a plain object, and ≤ 64 KB.
 
-| Wire field          | Required | Type           | Constraints                                         | Maps to `ClaudeContext` field |
-| ------------------- | -------- | -------------- | --------------------------------------------------- | ----------------------------- |
-| `SESSION_TS`        | yes      | string         | Format `YYYYMMDD-HHMMSS`                            | `sessionTs`                   |
-| `SESSION_SLUG`      | yes      | string         | 1–256 chars, no control chars                       | `slug`                        |
-| `WORKING_DIRECTORY` | yes      | string         | 1–1024 chars, no control chars                      | `workingDirectory`            |
-| `BRANCH`            | see note | string         | 1–256 chars, no control chars                       | `branch`                      |
-| `WORKTREE`          | see note | string         | 1–256 chars, no control chars                       | `branch` (fallback)           |
-| `REPO`              | yes      | string         | `owner/name` format, no bare dots, no control chars | `repo`                        |
-| `PR_NUM`            | no       | number \| null | Positive integer ≥ 1, or omitted/null               | `prNumber`                    |
-| `ISSUE_NUM`         | no       | number \| null | Positive integer ≥ 1, or omitted/null               | `issueNumber`                 |
+| Wire field          | Required | Type           | Constraints                                         | Maps to `SessionContext` field |
+| ------------------- | -------- | -------------- | --------------------------------------------------- | ------------------------------ |
+| `SESSION_TS`        | yes      | string         | Format `YYYYMMDD-HHMMSS`                            | `sessionTs`                    |
+| `SESSION_SLUG`      | yes      | string         | 1–256 chars, no control chars                       | `slug`                         |
+| `WORKING_DIRECTORY` | yes      | string         | 1–1024 chars, no control chars                      | `workingDirectory`             |
+| `BRANCH`            | see note | string         | 1–256 chars, no control chars                       | `branch`                       |
+| `WORKTREE`          | see note | string         | 1–256 chars, no control chars                       | `branch` (fallback)            |
+| `REPO`              | yes      | string         | `owner/name` format, no bare dots, no control chars | `repo`                         |
+| `PR_NUM`            | no       | number \| null | Positive integer ≥ 1, or omitted/null               | `prNumber`                     |
+| `ISSUE_NUM`         | no       | number \| null | Positive integer ≥ 1, or omitted/null               | `issueNumber`                  |
 
 ### BRANCH vs WORKTREE
 
 At least one of `BRANCH` or `WORKTREE` must be present and valid. `BRANCH` takes
-precedence when both are provided. Both map to the same `branch` field on `ClaudeContext`.
+precedence when both are provided. Both map to the same `branch` field on `SessionContext`.
 
 **Producer guidance:**
 
@@ -153,7 +153,7 @@ ESC ] 7337 ; BEL
 The bare-name production case uses `basename "$repo_top"` — the short directory name of the
 repository root — because the shell may not have access to the full `owner/name` identity.
 Only the `branch` field is dispatched in that case; the `repo` field from a prior OSC 6800
-ClaudeContext is not overwritten.
+SessionContext is not overwritten.
 
 ### Validation (owner/name case)
 
@@ -174,17 +174,17 @@ with an empty `workingDirectory` from being emitted.
 `SessionCard.tsx` resolves what to display using:
 
 ```typescript
-const meta = claudeContext ?? shellContext ?? getMockClaudeContext(cardId);
+const meta = sessionContext ?? shellContext ?? getMockSessionContext(cardId);
 ```
 
 | Scenario                                   | Display source                                 |
 | ------------------------------------------ | ---------------------------------------------- |
-| Claude session active (OSC 6800 received)  | `ClaudeContext`                                |
-| Shell context available, no Claude session | `ShellContext`                                 |
+| AI CLI session active (OSC 6800 received)  | `SessionContext`                               |
+| Shell context available, no AI CLI session | `ShellContext`                                 |
 | Neither slot populated                     | Deterministic mock fixture (keyed by `cardId`) |
 
 When `ShellContext` is the source, the slug row shows `"(shell)"` instead of a session slug,
-and `prNumber` / `issueNumber` are not shown (they only exist on `ClaudeContext`).
+and `prNumber` / `issueNumber` are not shown (they only exist on `SessionContext`).
 
 ---
 
@@ -196,13 +196,13 @@ The following six steps describe the path from PTY output to rendered UI.
 2. **xterm.js** — intercepts the sequence via registered OSC handlers (`registerOscHandler`).
 3. **`Terminal.tsx`** — the handler validates the payload via the appropriate parser, updates
    `lastShellContextRef` (for OSC 7/7337), and dispatches via `queueMicrotask` to avoid
-   re-entering the parser synchronously. Calls `onClaudeContextChange` (OSC 6800) or
+   re-entering the parser synchronously. Calls `onSessionContextChange` (OSC 6800) or
    `onShellContextChange` (OSC 7/7337).
 4. **`AppLayout.tsx`** — receives the callback, forwards to `App.tsx` state via props.
-5. **`App.tsx` reducer** — `setClaudeContext` stores a validated `ClaudeContext` in
-   `AppState.claudeContext[id]`; `setShellContext` stores a validated `ShellContext` in
+5. **`App.tsx` reducer** — `setSessionContext` stores a validated `SessionContext` in
+   `AppState.sessionContext[id]`; `setShellContext` stores a validated `ShellContext` in
    `AppState.shellContext[id]`. Both actions are no-ops if the card id is not in `state.cards`.
-6. **`SessionCard.tsx`** — re-renders with the new context, applying the `claudeContext ??
+6. **`SessionCard.tsx`** — re-renders with the new context, applying the `sessionContext ??
 shellContext ?? mock` precedence to produce the displayed slug, branch, repo, and badges.
 
 OSC handler disposables are cleaned up on `Terminal` unmount, before `term.dispose()`.
@@ -216,7 +216,7 @@ sequences. The single audit entry point is `src/types/sessionPayload.ts`, which 
 
 | Function                     | Validates | Returns on success                   |
 | ---------------------------- | --------- | ------------------------------------ |
-| `parseSessionContextPayload` | OSC 6800  | `ClaudeContext`                      |
+| `parseSessionContextPayload` | OSC 6800  | `SessionContext`                     |
 | `parseOsc7Payload`           | OSC 7     | `{ workingDirectory: string }`       |
 | `parseOsc7337Payload`        | OSC 7337  | branch/repo partial or cleared shape |
 
@@ -255,13 +255,13 @@ OSC 7337 requires a custom hook that queries `git rev-parse --abbrev-ref HEAD` a
 
 ## 9. Behavioural notes
 
-### ClaudeContext is authoritative (F-2)
+### SessionContext is authoritative (F-2)
 
 An empty OSC 7337 clear payload sets `ShellContext.branch` and `ShellContext.repo` to
-`undefined`. However, because `claudeContext ?? shellContext` is evaluated at render time,
-a card that already has a `ClaudeContext` continues to display its Claude branch and repo
+`undefined`. However, because `sessionContext ?? shellContext` is evaluated at render time,
+a card that already has a `SessionContext` continues to display its session branch and repo
 unchanged — the cleared `ShellContext` is never consulted. This is intentional: transient
-shell drift (e.g. `cd` into a non-git directory) does not erase the Claude session display.
+shell drift (e.g. `cd` into a non-git directory) does not erase the AI CLI session display.
 
 ### OSC 7337 before OSC 7 is silently dropped (F-1)
 
@@ -288,6 +288,6 @@ sub-prompt in duration and self-corrects without any coordination required.
 
 ### Replacement semantics
 
-Both `setClaudeContext` and `setShellContext` are full replacements, not patches.
-Each new ClaudeContext or ShellContext completely overwrites the previous value for that
+Both `setSessionContext` and `setShellContext` are full replacements, not patches.
+Each new SessionContext or ShellContext completely overwrites the previous value for that
 card. There is no incremental merge within a slot.
