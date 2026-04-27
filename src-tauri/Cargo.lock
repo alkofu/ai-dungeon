@@ -22,6 +22,7 @@ name = "ai-dungeon"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "nix",
  "portable-pty",
  "serde",
  "serde_json",
