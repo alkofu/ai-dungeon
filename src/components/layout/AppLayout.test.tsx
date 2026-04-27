@@ -130,9 +130,10 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId={null}
         onActiveIdChange={vi.fn()}
-        sessionContext={{}}
-        onSessionContextChange={vi.fn()}
-        onSessionContextPatch={vi.fn()}
+        claudeContext={{}}
+        onClaudeContextChange={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
       />,
     );
 
@@ -160,9 +161,10 @@ describe("AppLayout", () => {
             onRemoveCard={vi.fn()}
             activeId="A"
             onActiveIdChange={vi.fn()}
-            sessionContext={{}}
-            onSessionContextChange={vi.fn()}
-            onSessionContextPatch={vi.fn()}
+            claudeContext={{}}
+            onClaudeContextChange={vi.fn()}
+            shellContext={{}}
+            onShellContextChange={vi.fn()}
           />
         </React.StrictMode>,
       );
@@ -206,9 +208,10 @@ describe("AppLayout", () => {
         onRemoveCard={vi.fn()}
         activeId="card-1"
         onActiveIdChange={vi.fn()}
-        sessionContext={{}}
-        onSessionContextChange={vi.fn()}
-        onSessionContextPatch={vi.fn()}
+        claudeContext={{}}
+        onClaudeContextChange={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
       />,
     );
 
@@ -225,9 +228,10 @@ describe("AppLayout", () => {
           onRemoveCard={vi.fn()}
           activeId="card-1"
           onActiveIdChange={vi.fn()}
-          sessionContext={{}}
-          onSessionContextChange={vi.fn()}
-          onSessionContextPatch={vi.fn()}
+          claudeContext={{}}
+          onClaudeContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
         />,
       );
       await Promise.resolve();
@@ -280,9 +284,10 @@ describe("AppLayout — keyboard navigation", () => {
         onRemoveCard={vi.fn()}
         activeId={activeId}
         onActiveIdChange={onActiveIdChange}
-        sessionContext={{}}
-        onSessionContextChange={vi.fn()}
-        onSessionContextPatch={vi.fn()}
+        claudeContext={{}}
+        onClaudeContextChange={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
       />,
     );
     return { ...result, onActiveIdChange, user };

@@ -41,7 +41,7 @@ import {
   parseOsc7Payload,
   parseOsc7337Payload,
 } from "../../types/sessionPayload";
-import type { SessionContext } from "../../types/session";
+import type { ClaudeContext, ShellContext } from "../../types/session";
 
 interface TerminalProps {
   // The caller supplies a stable UUID that identifies this PTY session. The
@@ -49,14 +49,14 @@ interface TerminalProps {
   // triggers a full unmount/re-spawn via the useEffect dependency array.
   sessionId: string;
   // Called whenever an OSC 6800 payload is received and successfully parsed.
-  // Fires with a fully-formed SessionContext (full replacement).
+  // Fires with a fully-formed ClaudeContext (full replacement).
   // Captured via a ref so the OSC handler always uses the latest version without
   // needing to be in the useEffect dependency array (which would restart the PTY
   // session on every re-render of the parent).
-  onSessionContextChange?: (ctx: SessionContext) => void;
-  // Called whenever an OSC 7 or OSC 7337 payload is received and successfully parsed.
-  // Fires with a partial patch that is merged into the existing SessionContext record.
-  onSessionContextPatch?: (patch: Partial<SessionContext>) => void;
+  onClaudeContextChange?: (ctx: ClaudeContext) => void;
+  // Called whenever a ShellContext is assembled from OSC 7 / OSC 7337 payloads.
+  // Fires with a fully-formed ShellContext (full replacement).
+  onShellContextChange?: (ctx: ShellContext) => void;
 }
 
 // ── Per-sid spawn-chain (Ruinor F-1 resolution) ───────────────────────────────
@@ -94,8 +94,8 @@ export function _clearSpawnChainForTesting(): void {
 
 export function Terminal({
   sessionId,
-  onSessionContextChange,
-  onSessionContextPatch,
+  onClaudeContextChange,
+  onShellContextChange,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -103,10 +103,14 @@ export function Terminal({
   // version without adding them to the useEffect dependency array (which would
   // cause the effect — and therefore the PTY session — to restart every time the
   // parent re-renders). Assignments run on every render (component-top scope).
-  const onSessionContextChangeRef = useRef(onSessionContextChange);
-  onSessionContextChangeRef.current = onSessionContextChange;
-  const onSessionContextPatchRef = useRef(onSessionContextPatch);
-  onSessionContextPatchRef.current = onSessionContextPatch;
+  const onClaudeContextChangeRef = useRef(onClaudeContextChange);
+  onClaudeContextChangeRef.current = onClaudeContextChange;
+  const onShellContextChangeRef = useRef(onShellContextChange);
+  onShellContextChangeRef.current = onShellContextChange;
+
+  // Accumulates CWD/branch/repo across OSC 7 and OSC 7337 events.
+  // Null before any OSC 7 has been received for this mount.
+  const lastShellContextRef = useRef<ShellContext | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -351,7 +355,7 @@ export function Terminal({
       oscDisposable = term.parser.registerOscHandler(6800, (data: string) => {
         const ctx = parseSessionContextPayload(data);
         if (ctx) {
-          queueMicrotask(() => onSessionContextChangeRef.current?.(ctx));
+          queueMicrotask(() => onClaudeContextChangeRef.current?.(ctx));
         }
         return true;
       });
@@ -362,7 +366,15 @@ export function Terminal({
       // a thin call-site only.
       osc7Handler = term.parser.registerOscHandler(7, (data): boolean => {
         const result = parseOsc7Payload(data);
-        if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+        if (result) {
+          const { workingDirectory } = result;
+          queueMicrotask(() => {
+            // New shell context: merge workingDirectory into accumulated state.
+            const ctx: ShellContext = { ...lastShellContextRef.current, workingDirectory };
+            lastShellContextRef.current = ctx;
+            onShellContextChangeRef.current?.(ctx);
+          });
+        }
         return true;
       });
 
@@ -372,7 +384,23 @@ export function Terminal({
       // a thin call-site only.
       osc7337Handler = term.parser.registerOscHandler(7337, (data): boolean => {
         const result = parseOsc7337Payload(data);
-        if (result) queueMicrotask(() => onSessionContextPatchRef.current?.(result));
+        if (result) {
+          queueMicrotask(() => {
+            // F-1 invariant: only emit when a workingDirectory exists (OSC 7 must arrive first).
+            const workingDirectory = lastShellContextRef.current?.workingDirectory;
+            if (!workingDirectory) return;
+
+            const branch = "branch" in result ? result.branch : undefined;
+            const repo = "repo" in result ? result.repo : undefined;
+            const ctx: ShellContext = {
+              workingDirectory,
+              ...(branch !== undefined ? { branch } : {}),
+              ...(repo !== undefined ? { repo } : {}),
+            };
+            lastShellContextRef.current = ctx;
+            onShellContextChangeRef.current?.(ctx);
+          });
+        }
         return true;
       });
     })();
@@ -465,6 +493,8 @@ export function Terminal({
       // Clear the pending queue so a remount does not replay stale input from
       // this unmounted instance.
       pendingWrites.length = 0;
+      // Clear accumulated shell context so a remount starts clean.
+      lastShellContextRef.current = null;
       observer.disconnect();
       oscDisposable?.dispose(); // OSC 6800
       osc7Handler?.dispose(); // OSC 7
