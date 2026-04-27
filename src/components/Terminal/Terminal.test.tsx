@@ -875,238 +875,45 @@ describe("Terminal", () => {
 
   // ── OSC 7 handler ─────────────────────────────────────────────────────────
 
-  it("OSC 7 handler with valid file:// URI calls onSessionContextPatch with decoded workingDirectory after microtask", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    const result = osc7Handler("file://localhost/Users/me/projects/foo");
-    expect(result).toBe(true);
-
-    // Must NOT be called synchronously.
-    expect(onSessionContextPatch).not.toHaveBeenCalled();
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledTimes(1);
-        expect(onSessionContextPatch).toHaveBeenCalledWith({
-          workingDirectory: "/Users/me/projects/foo",
-        });
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with percent-encoded path decodes correctly", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    osc7Handler("file:///Users/me/My%20Projects/foo");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledWith({
-          workingDirectory: "/Users/me/My Projects/foo",
-        });
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with empty-host file URI (file:///path) decodes correctly", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    osc7Handler("file:///Users/me/projects/foo");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledWith({
-          workingDirectory: "/Users/me/projects/foo",
-        });
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with malformed URL does not call onSessionContextPatch", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    osc7Handler("not a url");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with non-file: scheme does not call onSessionContextPatch", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    const result = osc7Handler("https://example.com/path");
-    expect(result).toBe(true);
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with malformed percent-encoding falls back to raw pathname", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    osc7Handler("file:///bad%path");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledWith({
-          workingDirectory: "/bad%path",
-        });
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with workingDirectory exceeding 1024 chars is silently dropped", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    const result = osc7Handler("file:///" + "a".repeat(2000));
-    expect(result).toBe(true);
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7 handler with control characters in path is silently dropped", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    const result = osc7Handler("file:///foo\x01bar");
-    expect(result).toBe(true);
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
   // ── OSC 7337 handler ──────────────────────────────────────────────────────
 
-  it("OSC 7337 handler with bare repo name (production wire format) calls onSessionContextPatch with branch only", async () => {
-    const onSessionContextPatch = vi.fn();
+  // ── onShellContextChange tests (Step 2) ──────────────────────────────────────
+
+  it("OSC 7 handler calls onShellContextChange with workingDirectory after microtask", async () => {
+    const onShellContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
+        onShellContextChange={onShellContextChange}
+      />,
+    );
+
+    await vi.waitFor(() => {
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+    });
+
+    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
+    osc7Handler("file://localhost/Users/me/projects/foo");
+
+    expect(onShellContextChange).not.toHaveBeenCalled();
+
+    return new Promise<void>((resolve) => {
+      queueMicrotask(() => {
+        expect(onShellContextChange).toHaveBeenCalledTimes(1);
+        expect(onShellContextChange).toHaveBeenCalledWith(
+          expect.objectContaining({ workingDirectory: "/Users/me/projects/foo" }),
+        );
+        resolve();
+      });
+    });
+  });
+
+  it("OSC 7337 (bare-name) calls onShellContextChange with branch only (no repo) after OSC 7", async () => {
+    const onShellContextChange = vi.fn();
+    renderWithProviders(
+      <Terminal
+        sessionId="00000000-0000-0000-0000-000000000001"
+        onShellContextChange={onShellContextChange}
       />,
     );
 
@@ -1114,28 +921,35 @@ describe("Terminal", () => {
       expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
     });
 
+    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
 
+    // First OSC 7 to establish CWD.
+    osc7Handler("file:///Users/me/project");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    onShellContextChange.mockClear();
+
+    // Then OSC 7337 bare-name.
     osc7337Handler("ai-dungeon\tmain");
 
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledTimes(1);
-        const patch = onSessionContextPatch.mock.calls[0][0];
-        expect(patch).toEqual({ branch: "main" });
-        expect(patch).not.toHaveProperty("repo");
+        expect(onShellContextChange).toHaveBeenCalledTimes(1);
+        const ctx = onShellContextChange.mock.calls[0][0];
+        expect(ctx.workingDirectory).toBe("/Users/me/project");
+        expect(ctx.branch).toBe("main");
+        expect(ctx).not.toHaveProperty("repo");
         resolve();
       });
     });
   });
 
-  it("OSC 7337 handler with owner/name form calls onSessionContextPatch with full repo + branch", async () => {
-    const onSessionContextPatch = vi.fn();
+  it("OSC 7337 (owner/name) calls onShellContextChange with branch + repo after OSC 7", async () => {
+    const onShellContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
+        onShellContextChange={onShellContextChange}
       />,
     );
 
@@ -1143,14 +957,20 @@ describe("Terminal", () => {
       expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
     });
 
+    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
+
+    osc7Handler("file:///Users/me/project");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    onShellContextChange.mockClear();
 
     osc7337Handler("acme/widgets\tmain");
 
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledWith({
+        expect(onShellContextChange).toHaveBeenCalledTimes(1);
+        expect(onShellContextChange).toHaveBeenCalledWith({
+          workingDirectory: "/Users/me/project",
           branch: "main",
           repo: { owner: "acme", name: "widgets" },
         });
@@ -1159,12 +979,12 @@ describe("Terminal", () => {
     });
   });
 
-  it("OSC 7337 handler with empty payload calls onSessionContextPatch with cleared branch and repo", async () => {
-    const onSessionContextPatch = vi.fn();
+  it("OSC 7337 (cleared) before any OSC 7 is a no-op for onShellContextChange", async () => {
+    const onShellContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
+        onShellContextChange={onShellContextChange}
       />,
     );
 
@@ -1173,232 +993,92 @@ describe("Terminal", () => {
     });
 
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
 
+    // No OSC 7 has been received — cleared shape is a no-op.
     osc7337Handler("");
 
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onSessionContextPatch).toHaveBeenCalledWith({
-          branch: undefined,
-          repo: undefined,
-        });
+        expect(onShellContextChange).not.toHaveBeenCalled();
         resolve();
       });
     });
   });
 
-  it("OSC 7337 handler with malformed payload (no tab) does not call onSessionContextPatch", async () => {
-    const onSessionContextPatch = vi.fn();
+  it("OSC 7 followed by OSC 7337 (bare-name) produces ShellContext with both fields", async () => {
+    const onShellContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
+        onShellContextChange={onShellContextChange}
       />,
     );
 
     await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
     });
 
+    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
 
-    osc7337Handler("no-tab-here");
+    osc7Handler("file:///home/user/repo");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
 
+    osc7337Handler("my-repo\tfeat/branch");
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
+        const lastCall =
+          onShellContextChange.mock.calls[onShellContextChange.mock.calls.length - 1][0];
+        expect(lastCall.workingDirectory).toBe("/home/user/repo");
+        expect(lastCall.branch).toBe("feat/branch");
         resolve();
       });
     });
   });
 
-  it("OSC 7337 handler with empty branch field does not call onSessionContextPatch", async () => {
-    const onSessionContextPatch = vi.fn();
+  // F-1 round-trip test
+  it("OSC 7 → OSC 7337 (bare-name) → OSC 7337 (cleared) → OSC 7337 (bare-name) — final ShellContext has workingDirectory + branch, no repo from intermediate state", async () => {
+    const onShellContextChange = vi.fn();
     renderWithProviders(
       <Terminal
         sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
+        onShellContextChange={onShellContextChange}
       />,
     );
 
     await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
     });
 
+    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
     const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
 
-    osc7337Handler("acme/widgets\t");
+    // Step 1: establish CWD.
+    osc7Handler("file:///home/user/repo");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // Step 2: set branch (bare-name).
+    osc7337Handler("my-repo\tfeat/branch");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // Step 3: clear branch/repo (cleared shape).
+    osc7337Handler("");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // At this point lastShellContextRef has only workingDirectory — no branch, no repo.
+
+    // Step 4: set branch again (bare-name).
+    onShellContextChange.mockClear();
+    osc7337Handler("my-repo\tnew-branch");
 
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7337 handler with empty repo field does not call onSessionContextPatch", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
-
-    osc7337Handler("\tmain");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7337 handler with owner/name where one side is empty does not call onSessionContextPatch", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
-
-    osc7337Handler("/widgets\tmain");
-
-    return new Promise<void>((resolveOuter) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        // Also test the name side empty.
-        onSessionContextPatch.mockClear();
-        osc7337Handler("acme/\tmain");
-        queueMicrotask(() => {
-          expect(onSessionContextPatch).not.toHaveBeenCalled();
-          resolveOuter();
-        });
-      });
-    });
-  });
-
-  it("OSC 7337 handler with branch over 256 chars (bare-name path) is silently dropped", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
-
-    const result = osc7337Handler("ai-dungeon\t" + "b".repeat(257));
-    expect(result).toBe(true);
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7337 handler with control char in branch is silently dropped", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
-
-    osc7337Handler("ai-dungeon\tma\x01in");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7337 handler with control char in owner segment is silently dropped", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
-
-    osc7337Handler("ac\x01me/widgets\tmain");
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
-        resolve();
-      });
-    });
-  });
-
-  it("OSC 7337 handler with over-length branch in owner/name path is silently dropped", async () => {
-    const onSessionContextPatch = vi.fn();
-    renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onSessionContextPatch={onSessionContextPatch}
-      />,
-    );
-
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7337)![1];
-    expect(osc7337Handler).toBeDefined();
-
-    const result = osc7337Handler("acme/widgets\t" + "b".repeat(257));
-    expect(result).toBe(true);
-
-    return new Promise<void>((resolve) => {
-      queueMicrotask(() => {
-        expect(onSessionContextPatch).not.toHaveBeenCalled();
+        expect(onShellContextChange).toHaveBeenCalledTimes(1);
+        const ctx = onShellContextChange.mock.calls[0][0];
+        expect(ctx.workingDirectory).toBe("/home/user/repo");
+        expect(ctx.branch).toBe("new-branch");
+        // No repo should be present — cleared shape removed it, bare-name doesn't restore it.
+        expect(ctx.repo).toBeUndefined();
         resolve();
       });
     });
@@ -1458,42 +1138,6 @@ describe("Terminal", () => {
   });
 
   // ── Ref-staleness test ────────────────────────────────────────────────────
-
-  it("OSC 7 handler always invokes the latest onSessionContextPatch callback after a re-render", async () => {
-    const cbA = vi.fn();
-    const cbB = vi.fn();
-
-    const { rerender } = renderWithProviders(
-      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionContextPatch={cbA} />,
-    );
-
-    // Wait for OSC 7 handler to be registered.
-    await vi.waitFor(() => {
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c) => c[0] === 7)![1];
-    expect(osc7Handler).toBeDefined();
-
-    // Fire OSC 7 with cbA and wait for microtask.
-    osc7Handler("file:///Users/me/first");
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-    expect(cbA).toHaveBeenCalledTimes(1);
-    expect(cbB).not.toHaveBeenCalled();
-
-    // Re-render with cbB (fresh callback reference).
-    rerender(
-      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onSessionContextPatch={cbB} />,
-    );
-
-    // Fire OSC 7 again — must invoke cbB (latest), not cbA.
-    osc7Handler("file:///Users/me/second");
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-    expect(cbB).toHaveBeenCalledTimes(1);
-    expect(cbB).toHaveBeenCalledWith({ workingDirectory: "/Users/me/second" });
-    // cbA must NOT have been called again.
-    expect(cbA).toHaveBeenCalledTimes(1);
-  });
 
   // ── WebFontsAddon load-order invariants ──────────────────────────────────────
 

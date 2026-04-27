@@ -132,7 +132,8 @@ describe("AppLayout", () => {
         onActiveIdChange={vi.fn()}
         sessionContext={{}}
         onSessionContextChange={vi.fn()}
-        onSessionContextPatch={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
       />,
     );
 
@@ -162,7 +163,8 @@ describe("AppLayout", () => {
             onActiveIdChange={vi.fn()}
             sessionContext={{}}
             onSessionContextChange={vi.fn()}
-            onSessionContextPatch={vi.fn()}
+            shellContext={{}}
+            onShellContextChange={vi.fn()}
           />
         </React.StrictMode>,
       );
@@ -208,7 +210,8 @@ describe("AppLayout", () => {
         onActiveIdChange={vi.fn()}
         sessionContext={{}}
         onSessionContextChange={vi.fn()}
-        onSessionContextPatch={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
       />,
     );
 
@@ -227,7 +230,8 @@ describe("AppLayout", () => {
           onActiveIdChange={vi.fn()}
           sessionContext={{}}
           onSessionContextChange={vi.fn()}
-          onSessionContextPatch={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
         />,
       );
       await Promise.resolve();
@@ -282,7 +286,8 @@ describe("AppLayout — keyboard navigation", () => {
         onActiveIdChange={onActiveIdChange}
         sessionContext={{}}
         onSessionContextChange={vi.fn()}
-        onSessionContextPatch={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
       />,
     );
     return { ...result, onActiveIdChange, user };

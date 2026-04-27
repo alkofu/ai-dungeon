@@ -19,7 +19,13 @@ function renderNavBar(ui: ReactElement) {
 describe("NavBar", () => {
   it("renders empty state when no cards are provided", () => {
     renderNavBar(
-      <NavBar cards={[]} onAddCard={vi.fn()} onRemoveCard={vi.fn()} sessionContext={{}} />,
+      <NavBar
+        cards={[]}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        sessionContext={{}}
+        shellContext={{}}
+      />,
     );
 
     expect(screen.getByText("No cards yet")).toBeInTheDocument();
@@ -33,6 +39,7 @@ describe("NavBar", () => {
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
         sessionContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -47,7 +54,13 @@ describe("NavBar", () => {
     const user = userEvent.setup();
 
     renderNavBar(
-      <NavBar cards={[]} onAddCard={onAddCard} onRemoveCard={onRemoveCard} sessionContext={{}} />,
+      <NavBar
+        cards={[]}
+        onAddCard={onAddCard}
+        onRemoveCard={onRemoveCard}
+        sessionContext={{}}
+        shellContext={{}}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
@@ -66,6 +79,7 @@ describe("NavBar", () => {
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -85,6 +99,7 @@ describe("NavBar", () => {
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -106,6 +121,7 @@ describe("NavBar", () => {
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -139,6 +155,7 @@ describe("NavBar", () => {
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
         sessionContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -172,6 +189,7 @@ describe("NavBar", () => {
           onAddCard={vi.fn()}
           onRemoveCard={onRemoveCard}
           sessionContext={{}}
+          shellContext={{}}
         />
       </Tabs>,
     );

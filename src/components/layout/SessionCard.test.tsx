@@ -5,6 +5,7 @@ import { Tabs } from "@mantine/core";
 import { renderWithProviders } from "../../test-utils/render";
 import { SessionCard } from "./SessionCard";
 import { getMockSessionContext, SESSION_CONTEXT_FIXTURES } from "./sessionContext.mock";
+import type { ShellContext } from "../../types/session";
 
 // Cards 1–5 are wrapped in Tabs context matching production rendering.
 function renderInTabs(cardId: string, onRemove = vi.fn()) {
@@ -185,6 +186,93 @@ describe("SessionCard", () => {
     const a = getMockSessionContext(id);
     const b = getMockSessionContext(id);
     expect(a).toEqual(b);
+  });
+
+  // ── Two-slot rendering tests (Step 3) ─────────────────────────────────────
+
+  it("renders shell context when no session context: slug is '(shell)', branch and repo from shellContext appear", () => {
+    const shellCtx: ShellContext = {
+      workingDirectory: "/shell/path/to/project",
+      branch: "shell-branch",
+      repo: { owner: "shell-owner", name: "shell-repo" },
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="shell-card">
+          <SessionCard cardId="shell-card" onRemove={vi.fn()} shellContext={shellCtx} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("(shell)")).toBeInTheDocument();
+    expect(screen.getByText("shell-branch")).toBeInTheDocument();
+    expect(screen.getByText("shell-repo")).toBeInTheDocument();
+  });
+
+  it("session context wins over shell context when both present", () => {
+    const shellCtx: ShellContext = {
+      workingDirectory: "/shell/path",
+      branch: "shell-branch",
+    };
+    const sessionCtx = {
+      sessionTs: "20260425-120000",
+      slug: "session-slug",
+      workingDirectory: "/session/path",
+      branch: "session-branch",
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="combined-card">
+          <SessionCard
+            cardId="combined-card"
+            onRemove={vi.fn()}
+            sessionContext={sessionCtx}
+            shellContext={shellCtx}
+          />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("session-slug")).toBeInTheDocument();
+    expect(screen.getByText("session-branch")).toBeInTheDocument();
+    expect(screen.queryByText("shell-branch")).toBeNull();
+  });
+
+  it("falls back to mock when neither sessionContext nor shellContext present", () => {
+    renderInTabs(CARD_ID_F0);
+    const fixture = SESSION_CONTEXT_FIXTURES[0];
+    expect(screen.getByText(fixture.slug)).toBeInTheDocument();
+  });
+
+  // F-2: session context with branch + cleared shell context shows session branch
+  it("session context with branch present + empty OSC 7337 cleared shell context: SessionCard shows the session branch, not cleared", () => {
+    const sessionCtx = {
+      sessionTs: "20260425-120000",
+      slug: "session-with-branch",
+      workingDirectory: "/session/path",
+      branch: "session-main",
+      repo: { owner: "session-owner", name: "session-repo" },
+    };
+    // Cleared shell context: no branch, no repo (simulates OSC 7337 clear)
+    const clearedShellCtx: ShellContext = {
+      workingDirectory: "/shell/path",
+      branch: undefined,
+      repo: undefined,
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="f2-card">
+          <SessionCard
+            cardId="f2-card"
+            onRemove={vi.fn()}
+            sessionContext={sessionCtx}
+            shellContext={clearedShellCtx}
+          />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    // Session branch must be visible.
+    expect(screen.getByText("session-main")).toBeInTheDocument();
+    // Session slug must be visible.
+    expect(screen.getByText("session-with-branch")).toBeInTheDocument();
   });
 
   // ── sessionContext prop tests ──────────────────────────────────────────────

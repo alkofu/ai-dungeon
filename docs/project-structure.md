@@ -16,7 +16,7 @@ ai-dungeon/
 │   ├── App.tsx       # Root component — useReducer for cards + activeId; owns tab state
 │   ├── types/
 │   │   ├── card.ts               # Card type ({ id: string })
-│   │   ├── session.ts            # SessionContext interface — fields sourced from OSC 6800 (full) and OSC 7 / OSC 7337 (partial merges); all values are UNTRUSTED. branch and repo are optional (cleared by empty OSC 7337).
+│   │   ├── session.ts            # SessionContext (OSC 6800) and ShellContext (OSC 7/7337) interfaces; all values are UNTRUSTED. branch and repo are optional on both types (cleared by empty OSC 7337).
 │   │   ├── sessionPayload.ts     # parseSessionContextPayload() / parseOsc7Payload() / parseOsc7337Payload() — validate all inbound OSC payloads before they enter app state. Single audit entry point for OSC 6800, OSC 7, and OSC 7337.
 │   │   └── sessionPayload.test.ts
 │   └── components/
@@ -25,11 +25,11 @@ ai-dungeon/
 │       │   ├── index.ts       # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — threads sessionContext + onSessionContextChange + onSessionContextPatch to NavBar and Terminal
-│           ├── NavBar.tsx             # Sidebar — passes per-card sessionContext to each SessionCard
-│           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; falls back to mock data until OSC 6800 arrives
-│           ├── SessionCard.test.tsx   # Unit tests for SessionCard (16 cases)
-│           ├── sessionContext.mock.ts # Deterministic mock SessionContext fixtures keyed by card id
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — threads sessionContext + shellContext + their change callbacks to NavBar and Terminal
+│           ├── NavBar.tsx             # Sidebar — passes per-card sessionContext and shellContext to each SessionCard
+│           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: sessionContext ?? shellContext ?? mock
+│           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
+│           ├── sessionContext.mock.ts  # Deterministic mock SessionContext fixtures keyed by card id
 │           └── index.ts              # Barrel export
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
@@ -84,7 +84,14 @@ For historical context and the full design rationale, see issue #32.
 
 ## OSC Session-Context Flow (6800 / 7 / 7337)
 
-AI CLIs running inside a terminal can broadcast structured session context by emitting an OSC 6800 escape sequence:
+The app uses a two-slot card context model. Each tab card independently accumulates context from two sources:
+
+- **SessionContext** (OSC 6800) — full session snapshot emitted by an AI CLI. Contains slug, workingDirectory, branch, repo, prNumber, issueNumber.
+- **ShellContext** (OSC 7 / OSC 7337) — shell-derived context: workingDirectory from OSC 7 (`file://` URI) and branch/repo from OSC 7337.
+
+Rendering precedence in `SessionCard.tsx`: `sessionContext ?? shellContext ?? getMockSessionContext(cardId)`.
+
+An AI CLI emits OSC 6800 like this:
 
 ```
 \033]6800;{"SESSION_TS":"20260425-120000","SESSION_SLUG":"my-session",...}\007
@@ -93,9 +100,9 @@ AI CLIs running inside a terminal can broadcast structured session context by em
 The data travels through the following layers:
 
 1. **PTY** — the CLI process writes the sequence to its stdout.
-2. **`Terminal.tsx`** — xterm.js intercepts OSC 6800, OSC 7, and OSC 7337. The 6800 handler dispatches a full SessionContext via onSessionContextChange; the 7 and 7337 handlers dispatch partial merges via onSessionContextPatch. Each handler delegates parsing to a dedicated parser in sessionPayload.ts, then wraps the dispatch in queueMicrotask to avoid re-entering the parser synchronously. The handlers are cleaned up on component unmount.
-3. **`parseSessionContextPayload()` / `parseOsc7Payload()` / `parseOsc7337Payload()` (`src/types/sessionPayload.ts`)** — single audit entry point for all OSC payload validation. Returns SessionContext / Partial<SessionContext> / null respectively. Never throw.
-4. **`App.tsx` reducer** — `setSessionContext` action stores a validated SessionContext in `AppState.sessionContext` (full replacement). `patchSessionContext` merges OSC 7 / OSC 7337 fields into the existing record. **It is a no-op if no record exists for that card id — OSC 6800 must initialise first; the no-op fires a DEV-only console.debug for observability.**
-5. **`SessionCard.tsx`** — reads its card's entry from `sessionContext`; falls back to `sessionContext.mock.ts` fixtures until the first valid OSC 6800 payload arrives for that tab.
+2. **`Terminal.tsx`** — xterm.js intercepts OSC 6800, OSC 7, and OSC 7337. The 6800 handler dispatches a full SessionContext via `onSessionContextChange`; the 7 and 7337 handlers accumulate a ShellContext in `lastShellContextRef` and dispatch via `onShellContextChange`. Each handler delegates parsing to a dedicated parser in `sessionPayload.ts`, then wraps the dispatch in `queueMicrotask` to avoid re-entering the parser synchronously. The handlers are cleaned up on component unmount.
+3. **`parseSessionContextPayload()` / `parseOsc7Payload()` / `parseOsc7337Payload()` (`src/types/sessionPayload.ts`)** — single audit entry point for all OSC payload validation. Returns `SessionContext` / `ShellContext | null` / partial updates / null respectively. Never throw.
+4. **`App.tsx` reducer** — `setSessionContext` stores a validated SessionContext in `AppState.sessionContext[id]` (full replacement). `setShellContext` stores a validated ShellContext in `AppState.shellContext[id]` (full replacement). Both are no-ops if the card id is not in `state.cards` — guards against races where an OSC handler fires after the card is removed.
+5. **`SessionCard.tsx`** — applies the `sessionContext ?? shellContext ?? mock` precedence. SessionContext is authoritative: an empty OSC 7337 clear does not erase branch/repo on a session-bound card.
 
-All `SessionContext` fields are treated as untrusted user-controlled data and must only be rendered as text. See [security.md](security.md) for the rendering constraint.
+All `SessionContext` and `ShellContext` fields are treated as untrusted user-controlled data and must only be rendered as text. See [security.md](security.md) for the rendering constraint. For the full OSC field specification, see [osc-protocol.md](osc-protocol.md).

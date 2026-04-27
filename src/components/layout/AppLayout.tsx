@@ -2,7 +2,7 @@ import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
 import type { Card } from "../../types/card";
-import type { SessionContext } from "../../types/session";
+import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
 
@@ -17,7 +17,8 @@ interface AppLayoutProps {
   onActiveIdChange: (value: string | null) => void;
   sessionContext: Record<string, SessionContext>;
   onSessionContextChange: (id: string, ctx: SessionContext) => void;
-  onSessionContextPatch: (id: string, patch: Partial<SessionContext>) => void;
+  shellContext: Record<string, ShellContext>;
+  onShellContextChange: (id: string, ctx: ShellContext) => void;
 }
 
 export function AppLayout({
@@ -28,7 +29,8 @@ export function AppLayout({
   onActiveIdChange,
   sessionContext,
   onSessionContextChange,
-  onSessionContextPatch,
+  shellContext,
+  onShellContextChange,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
 
@@ -138,6 +140,7 @@ export function AppLayout({
             onAddCard={onAddCard}
             onRemoveCard={onRemoveCard}
             sessionContext={sessionContext}
+            shellContext={shellContext}
           />
         </AppShell.Navbar>
 
@@ -157,7 +160,7 @@ export function AppLayout({
                 <Terminal
                   sessionId={card.id}
                   onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
-                  onSessionContextPatch={(patch) => onSessionContextPatch(card.id, patch)}
+                  onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
                 />
               </Tabs.Panel>
             ))
