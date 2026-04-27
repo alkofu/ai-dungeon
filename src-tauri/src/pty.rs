@@ -8,6 +8,10 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+#[cfg(unix)]
+use nix::sys::termios::{tcgetattr, tcdrain, tcsetattr, LocalFlags, SetArg};
+#[cfg(unix)]
+use std::os::fd::BorrowedFd;
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem as _};
 use tauri::{AppHandle, Emitter, State};
 
@@ -24,6 +28,23 @@ use tauri::{AppHandle, Emitter, State};
 // The mitigation is `add-zsh-hook` on zsh (deduplication-safe, append-style)
 // and `PROMPT_COMMAND` prepend on bash (safe against user appends, but not
 // against outright replacement with bare assignment).
+//
+// ECHO-window mitigation:
+// After `openpty`, the PTY's line discipline has ECHO enabled by default. The
+// spawned shell only clears ECHO once it has read its rc files and put the line
+// discipline into raw/cbreak mode for interactive editing. If we write the
+// polyglot in that window, the kernel echoes every byte back out the master, and
+// the frontend's xterm.js renders the polyglot text as visible garbage above the
+// first prompt. `with_echo_disabled` brackets the write with a tcgetattr /
+// ECHO-clear / tcsetattr(TCSANOW) / write / tcdrain / tcsetattr(restore)
+// sequence on the master FD so the slave never sees ECHO-on for our bytes. On
+// Linux and macOS, the master and slave PTY ends share a single line-discipline
+// termios object, so `tcgetattr`/`tcsetattr` against the master FD modifies the
+// same ECHO bit the slave sees — verified by portable-pty's own
+// `MasterPty::get_termios` implementation, which uses the same pattern. This
+// mitigation is best-effort: if any termios syscall fails, we log a warning and
+// proceed (the user sees the legacy echo behaviour, which is the pre-fix
+// baseline and therefore safe).
 //
 // The script:
 //   1. Defines __ai_dungeon_emit_ctx() which emits OSC 7 (CWD) and OSC 7337
@@ -168,6 +189,78 @@ fn resolve_pty_utf8_locale() -> String {
     }
 }
 
+/// Run `body` with the PTY master's termios `ECHO` flag temporarily cleared.
+///
+/// Saves the current termios via `tcgetattr`, clears `ECHO`, applies via
+/// `tcsetattr(TCSANOW)`, runs `body`, calls `tcdrain` so the slave has
+/// consumed any bytes `body` wrote, then restores the original termios.
+///
+/// On Linux and macOS, the master and slave PTY ends share a single
+/// line-discipline termios object, so `tcgetattr`/`tcsetattr` against the
+/// master FD modifies the same ECHO bit the slave sees — verified by
+/// portable-pty's own `MasterPty::get_termios` implementation, which uses
+/// the same pattern.
+///
+/// Note: `tcdrain` on a PTY master returns once the slave-side line
+/// discipline has accepted the bytes (not waiting for user-space shell to
+/// consume them), so it cannot deadlock against a not-yet-exec'd shell.
+///
+/// Failure-branch matrix — every termios syscall soft-fails:
+/// - (a) `tcgetattr` fails → log, run body anyway, skip drain, skip restore.
+///   The caller sees the legacy echo behaviour (pre-fix baseline), safe.
+/// - (b) `tcgetattr` ok, clear-`tcsetattr` fails → log, run body, skip drain,
+///   skip restore (state was never modified).
+/// - (c) `tcgetattr` ok, clear ok, body completes, `tcdrain` fails → log,
+///   still attempt restore.
+/// - (d) `tcgetattr` ok, clear ok, drain ok, restore-`tcsetattr` fails → log only.
+/// - (e) All-success → normal path.
+///
+/// This mitigation is best-effort: a termios failure logs a warning and
+/// proceeds without short-circuiting `body` or leaving the master in an
+/// unknown state.
+#[cfg(unix)]
+fn with_echo_disabled<F: FnOnce()>(master_fd: std::os::unix::io::RawFd, body: F) {
+    // SAFETY: We borrow (not own) the FD that portable-pty holds. BorrowedFd
+    // never closes the underlying file descriptor on drop.
+    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
+
+    // Branch (a): tcgetattr fails — run body, skip drain and restore.
+    let original = match tcgetattr(fd) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[ai-dungeon] termios tcgetattr failed: {e}");
+            body();
+            return;
+        }
+    };
+
+    let mut modified = original.clone();
+    modified.local_flags.remove(LocalFlags::ECHO);
+
+    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
+
+    // Branch (b): clear-tcsetattr fails — run body, skip drain and restore.
+    if let Err(e) = tcsetattr(fd, SetArg::TCSANOW, &modified) {
+        eprintln!("[ai-dungeon] termios tcsetattr (clear ECHO) failed: {e}");
+        body();
+        return;
+    }
+
+    body();
+
+    // Branch (c): tcdrain fails — log but still attempt restore.
+    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
+    if let Err(e) = tcdrain(fd) {
+        eprintln!("[ai-dungeon] termios tcdrain failed: {e}");
+    }
+
+    // Branch (d): restore-tcsetattr fails — log only.
+    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
+    if let Err(e) = tcsetattr(fd, SetArg::TCSANOW, &original) {
+        eprintln!("[ai-dungeon] termios tcsetattr (restore ECHO) failed: {e}");
+    }
+}
+
 /// Reserve a `session_id` slot in the map **before** any I/O.
 ///
 /// Returns `Ok(generation)` when the slot is free; inserts a `Reserved`
@@ -225,7 +318,8 @@ pub async fn pty_spawn(
     let generation = try_reserve_session_id(&state, &session_id)?;
 
     // ── Step 2: all I/O; on any failure, free the reservation ─────────────────
-    let result = (|| -> Result<(Arc<Mutex<Box<dyn MasterPty + Send>>>, Box<dyn Write + Send>, Box<dyn portable_pty::Child + Send>, Box<dyn Read + Send>), String> {
+    #[allow(clippy::type_complexity)]
+    let result = (|| -> Result<(Arc<Mutex<Box<dyn MasterPty + Send>>>, Box<dyn Write + Send>, Box<dyn portable_pty::Child + Send>, Box<dyn Read + Send>, i32), String> {
         let pty_system = NativePtySystem::default();
 
         let size = PtySize {
@@ -269,6 +363,14 @@ pub async fn pty_spawn(
             .take_writer()
             .map_err(|e| format!("take_writer failed: {e}"))?;
 
+        // Capture the raw FD before pair.master is moved into Arc<Mutex<>>.
+        // On Unix, MasterPty::as_raw_fd() always returns Some; -1 is a safe
+        // sentinel that will cause with_echo_disabled to soft-fail gracefully.
+        #[cfg(unix)]
+        let master_fd: i32 = pair.master.as_raw_fd().unwrap_or(-1);
+        #[cfg(not(unix))]
+        let master_fd: i32 = -1;
+
         // Now wrap master in Arc<Mutex<>> for shared resize access.
         let master = Arc::new(Mutex::new(pair.master));
 
@@ -286,7 +388,7 @@ pub async fn pty_spawn(
             .try_clone_reader()
             .map_err(|e| format!("failed to clone reader: {e}"))?;
 
-        Ok((master, writer, child, reader))
+        Ok((master, writer, child, reader, master_fd))
     })();
 
     match result {
@@ -297,7 +399,7 @@ pub async fn pty_spawn(
             }
             return Err(e);
         }
-        Ok((master, mut writer, child, reader)) => {
+        Ok((master, mut writer, child, reader, master_fd)) => {
             let shutdown = Arc::new(AtomicBool::new(false));
 
             // Inject the shell init polyglot on Unix so bash/zsh emit OSC 7 (CWD) and
@@ -307,17 +409,24 @@ pub async fn pty_spawn(
             // `pty_kill`, or a remount-spawn on the same sid (the session is still
             // unreachable from any other code path at this point).
             //
-            // Soft failure: on write or flush error we log and proceed. A terminal without
-            // OSC context is preferable to a failed `pty_spawn`. This matches the
-            // behaviour shipped in commit 5b64097 prior to the lifecycle refactor.
+            // `with_echo_disabled` brackets the write with a save/clear/`tcdrain`/restore
+            // sequence on the master FD to prevent the kernel from echoing the polyglot
+            // bytes back to the frontend before the shell has put the line discipline into
+            // its interactive (non-echoing) mode. See the ECHO-window mitigation comment
+            // above `SHELL_INIT_POLYGLOT` for details.
+            //
+            // Failure modes handled by `with_echo_disabled` (soft-fail on all):
+            //   1. tcgetattr fails  — body runs with echo still enabled (legacy behaviour).
+            //   2. tcsetattr fails  — body runs with echo still enabled (state unmodified).
+            //   3. write/flush fail — logged; the session continues without OSC context.
             #[cfg(unix)]
-            {
+            with_echo_disabled(master_fd, || {
                 if let Err(e) = writer.write_all(SHELL_INIT_POLYGLOT.as_bytes()) {
                     eprintln!("[ai-dungeon] shell init injection write failed: {e}");
                 } else if let Err(e) = writer.flush() {
                     eprintln!("[ai-dungeon] shell init injection flush failed: {e}");
                 }
-            }
+            });
 
             // Replace the Reserved placeholder with the fully-constructed Active session.
             let session = Arc::new(PtySession {
@@ -792,5 +901,91 @@ mod tests {
         assert_eq!(result, "en_US.UTF-8");
         #[cfg(not(target_os = "macos"))]
         assert_eq!(result, "C.UTF-8");
+    }
+
+    // ── with_echo_disabled tests ──────────────────────────────────────────────
+
+    /// `with_echo_disabled` must clear ECHO inside the body and restore it after.
+    ///
+    /// Opens a real PTY pair via `nix::pty::openpty`, asserts ECHO is initially
+    /// set on the master, calls `with_echo_disabled` with a body that reads back
+    /// termios to assert ECHO is cleared, then asserts ECHO is restored after the
+    /// call returns.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn with_echo_disabled_clears_and_restores_echo() {
+        use nix::pty::openpty;
+        use nix::sys::termios::{tcgetattr, LocalFlags};
+        use std::os::fd::{AsFd, AsRawFd};
+
+        let pty = openpty(None, None).expect("openpty must succeed in test");
+        let master_fd_raw = pty.master.as_fd().as_raw_fd();
+
+        // ECHO must be set initially (post-openpty default).
+        let initial = tcgetattr(pty.master.as_fd()).expect("tcgetattr must succeed on fresh PTY");
+        assert!(
+            initial.local_flags.contains(LocalFlags::ECHO),
+            "ECHO must be set on a freshly opened PTY master"
+        );
+
+        let mut echo_inside = true; // assume cleared; body will correct this
+        with_echo_disabled(master_fd_raw, || {
+            let t = tcgetattr(pty.master.as_fd()).expect("tcgetattr inside body must succeed");
+            echo_inside = t.local_flags.contains(LocalFlags::ECHO);
+        });
+
+        assert!(!echo_inside, "ECHO must be cleared inside the body");
+
+        // ECHO must be restored after with_echo_disabled returns.
+        let after = tcgetattr(pty.master.as_fd()).expect("tcgetattr after body must succeed");
+        assert!(
+            after.local_flags.contains(LocalFlags::ECHO),
+            "ECHO must be restored after with_echo_disabled returns"
+        );
+    }
+
+    /// `with_echo_disabled` must still run the body when `tcgetattr` fails (soft-fail
+    /// branch (a)). Using an FD that is guaranteed to be closed forces `EBADF`.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn with_echo_disabled_runs_body_when_tcgetattr_fails() {
+        use std::cell::Cell;
+        use std::os::unix::io::IntoRawFd;
+
+        // Open a file, extract its raw FD, then explicitly close it.
+        // The resulting FD value is now invalid (EBADF), exercising branch (a).
+        let file = std::fs::File::open("/dev/null").expect("open /dev/null must succeed");
+        let invalid_fd = file.into_raw_fd();
+        // Explicitly close the fd so it becomes invalid (EBADF).
+        // nix::unistd::close is available unconditionally (unistd mod is not feature-gated).
+        let _ = nix::unistd::close(invalid_fd);
+
+        let body_ran = Cell::new(false);
+        with_echo_disabled(invalid_fd, || {
+            body_ran.set(true);
+        });
+        assert!(body_ran.get(), "body must run even when tcgetattr fails (soft-fail)");
+    }
+
+    /// `with_echo_disabled` must still run the body when the FD is a regular file
+    /// (i.e., not a TTY). `tcgetattr` returns `ENOTTY`, exercising soft-fail branch (a).
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn with_echo_disabled_runs_body_for_non_tty_fd() {
+        use std::cell::Cell;
+        use std::os::unix::io::AsRawFd;
+
+        let file = std::fs::File::open("/dev/null").expect("open /dev/null must succeed");
+        let fd = file.as_raw_fd();
+
+        let body_ran = Cell::new(false);
+        // /dev/null is not a TTY; tcgetattr returns ENOTTY, exercising branch (a).
+        with_echo_disabled(fd, || {
+            body_ran.set(true);
+        });
+        assert!(body_ran.get(), "body must run even for a non-TTY fd (ENOTTY soft-fail)");
     }
 }
