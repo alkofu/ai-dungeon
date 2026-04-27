@@ -1,7 +1,7 @@
 # OSC Protocol Reference
 
 This document describes the three OSC escape sequences that the AI Dungeon terminal
-intercepts — OSC 6800 (Claude session metadata), OSC 7 (shell working directory),
+intercepts — OSC 6800 (AI CLI session metadata), OSC 7 (shell working directory),
 and OSC 7337 (git context) — and the two-slot card context model they feed into.
 
 ---
@@ -39,9 +39,9 @@ reason about the full per-card state.
 
 ---
 
-## 2. OSC 6800 — Claude session metadata
+## 2. OSC 6800 — AI CLI session metadata
 
-Emitted by an AI CLI (e.g. the TPK toolkit) whenever a new Claude session begins or its
+Emitted by an AI CLI (e.g. the TPK toolkit) whenever a new AI CLI session begins or its
 metadata changes.
 
 ### Wire format
@@ -233,13 +233,13 @@ shell commands. See [security.md](security.md) for the full constraint.
 
 ### When to emit OSC 6800
 
-Emit OSC 6800 at the start of every Claude CLI session and whenever the session metadata
+Emit OSC 6800 at the start of every AI CLI session and whenever the session metadata
 changes (e.g. when a PR is opened against the current branch). Emitting it more frequently
 than necessary is harmless; each payload is a full replacement.
 
 ### BRANCH vs WORKTREE
 
-See [Section 2](#2-osc-6800--claude-session-metadata) for the BRANCH/WORKTREE field choice.
+See [Section 2](#2-osc-6800--ai-cli-session-metadata) for the BRANCH/WORKTREE field choice.
 The short rule: use `BRANCH` for normal branch checkouts and `WORKTREE` for detached-HEAD
 worktree checkouts.
 

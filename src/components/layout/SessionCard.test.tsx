@@ -190,7 +190,7 @@ describe("SessionCard", () => {
 
   // ── Two-slot rendering tests (Step 3) ─────────────────────────────────────
 
-  it("renders shell context when no claude context: slug is '(shell)', branch and repo from shellContext appear", () => {
+  it("renders shell context when no session context: slug is '(shell)', branch and repo from shellContext appear", () => {
     const shellCtx: ShellContext = {
       workingDirectory: "/shell/path/to/project",
       branch: "shell-branch",
@@ -208,16 +208,16 @@ describe("SessionCard", () => {
     expect(screen.getByText("shell-repo")).toBeInTheDocument();
   });
 
-  it("claude context wins over shell context when both present", () => {
+  it("session context wins over shell context when both present", () => {
     const shellCtx: ShellContext = {
       workingDirectory: "/shell/path",
       branch: "shell-branch",
     };
-    const claudeCtx = {
+    const sessionCtx = {
       sessionTs: "20260425-120000",
-      slug: "claude-session",
-      workingDirectory: "/claude/path",
-      branch: "claude-branch",
+      slug: "session-slug",
+      workingDirectory: "/session/path",
+      branch: "session-branch",
     };
     renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
@@ -225,14 +225,14 @@ describe("SessionCard", () => {
           <SessionCard
             cardId="combined-card"
             onRemove={vi.fn()}
-            sessionContext={claudeCtx}
+            sessionContext={sessionCtx}
             shellContext={shellCtx}
           />
         </Tabs.Tab>
       </Tabs>,
     );
-    expect(screen.getByText("claude-session")).toBeInTheDocument();
-    expect(screen.getByText("claude-branch")).toBeInTheDocument();
+    expect(screen.getByText("session-slug")).toBeInTheDocument();
+    expect(screen.getByText("session-branch")).toBeInTheDocument();
     expect(screen.queryByText("shell-branch")).toBeNull();
   });
 
@@ -242,14 +242,14 @@ describe("SessionCard", () => {
     expect(screen.getByText(fixture.slug)).toBeInTheDocument();
   });
 
-  // F-2: claude context with branch + cleared shell context shows claude branch
-  it("claude context with branch present + empty OSC 7337 cleared shell context: SessionCard shows the claude branch, not cleared", () => {
-    const claudeCtx = {
+  // F-2: session context with branch + cleared shell context shows session branch
+  it("session context with branch present + empty OSC 7337 cleared shell context: SessionCard shows the session branch, not cleared", () => {
+    const sessionCtx = {
       sessionTs: "20260425-120000",
-      slug: "claude-with-branch",
-      workingDirectory: "/claude/path",
-      branch: "claude-main",
-      repo: { owner: "claude-owner", name: "claude-repo" },
+      slug: "session-with-branch",
+      workingDirectory: "/session/path",
+      branch: "session-main",
+      repo: { owner: "session-owner", name: "session-repo" },
     };
     // Cleared shell context: no branch, no repo (simulates OSC 7337 clear)
     const clearedShellCtx: ShellContext = {
@@ -263,16 +263,16 @@ describe("SessionCard", () => {
           <SessionCard
             cardId="f2-card"
             onRemove={vi.fn()}
-            sessionContext={claudeCtx}
+            sessionContext={sessionCtx}
             shellContext={clearedShellCtx}
           />
         </Tabs.Tab>
       </Tabs>,
     );
-    // Claude branch must be visible.
-    expect(screen.getByText("claude-main")).toBeInTheDocument();
-    // Claude slug must be visible.
-    expect(screen.getByText("claude-with-branch")).toBeInTheDocument();
+    // Session branch must be visible.
+    expect(screen.getByText("session-main")).toBeInTheDocument();
+    // Session slug must be visible.
+    expect(screen.getByText("session-with-branch")).toBeInTheDocument();
   });
 
   // ── sessionContext prop tests ──────────────────────────────────────────────
