@@ -35,7 +35,7 @@ ai-dungeon/
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point
 │   │   ├── lib.rs    # Library crate (command handlers)
-│   │   └── pty.rs    # PTY session management (spawn/write/resize/kill commands); generation tokens + duplicate-ID rejection prevent orphaned sessions on rapid remount; exports LC_ALL with UTF-8 locale on Unix
+│   │   └── pty.rs    # PTY session management (spawn/write/resize/kill commands); generation tokens + duplicate-ID rejection prevent orphaned sessions on rapid remount; exports LC_ALL with UTF-8 locale on Unix; bash/zsh sessions additionally receive `__ai_dungeon_emit_ctx` via per-session shell-startup-file injection (ZDOTDIR override for zsh, --rcfile for bash) so the hook is wired before ZLE binds the keyboard
 │   ├── capabilities/ # Tauri permission grants
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
