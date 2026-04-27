@@ -159,8 +159,7 @@ impl ShellInjection {
                 // Capture the user's current ZDOTDIR (may be unset).
                 let original_zdotdir = std::env::var_os("ZDOTDIR");
 
-                let script =
-                    build_zsh_init_script(original_zdotdir.as_deref());
+                let script = build_zsh_init_script(original_zdotdir.as_deref());
 
                 let rc_path = tempdir.path().join(".zshrc");
                 std::fs::OpenOptions::new()
@@ -199,10 +198,7 @@ impl ShellInjection {
                 let rcfile_path: OsString = init_path.into();
                 Ok(ShellInjection {
                     _tempdir: tempdir,
-                    extra_args: vec![
-                        OsString::from("--rcfile"),
-                        rcfile_path,
-                    ],
+                    extra_args: vec![OsString::from("--rcfile"), rcfile_path],
                     extra_env: vec![],
                 })
             }
@@ -365,7 +361,10 @@ pub struct PtyState {
 /// dynamic values read from the process environment.
 fn resolve_pty_utf8_locale() -> String {
     fn is_utf8_locale(v: &str) -> bool {
-        v.ends_with(".UTF-8") || v.ends_with(".utf-8") || v.ends_with(".UTF8") || v.ends_with(".utf8")
+        v.ends_with(".UTF-8")
+            || v.ends_with(".utf-8")
+            || v.ends_with(".UTF8")
+            || v.ends_with(".utf8")
     }
 
     if let Ok(v) = std::env::var("LC_ALL") {
@@ -398,7 +397,10 @@ fn resolve_pty_utf8_locale() -> String {
 /// `pty_spawn` calls this as its **first** action so that duplicate-spawn
 /// detection is cheap and requires no shell process to have been started.
 fn try_reserve_session_id(state: &PtyState, session_id: &str) -> Result<u64, String> {
-    let mut map = state.map.lock().map_err(|_| "state mutex poisoned".to_string())?;
+    let mut map = state
+        .map
+        .lock()
+        .map_err(|_| "state mutex poisoned".to_string())?;
 
     if map.contains_key(session_id) {
         return Err(format!("session already exists: {session_id}"));
@@ -542,7 +544,12 @@ pub async fn pty_spawn(
             .try_clone_reader()
             .map_err(|e| format!("failed to clone reader: {e}"))?;
 
-        Ok(SpawnResult { master, writer, child, reader })
+        Ok(SpawnResult {
+            master,
+            writer,
+            child,
+            reader,
+        })
     })();
 
     match result {
@@ -553,7 +560,12 @@ pub async fn pty_spawn(
             }
             return Err(e);
         }
-        Ok(SpawnResult { master, writer, child, reader }) => {
+        Ok(SpawnResult {
+            master,
+            writer,
+            child,
+            reader,
+        }) => {
             let shutdown = Arc::new(AtomicBool::new(false));
 
             // Replace the Reserved placeholder with the fully-constructed Active session.
@@ -649,7 +661,8 @@ pub fn pty_write(
 
     let mut w = writer.lock().map_err(|_| "writer mutex poisoned")?;
 
-    w.write_all(&bytes).map_err(|e| format!("write failed: {e}"))?;
+    w.write_all(&bytes)
+        .map_err(|e| format!("write failed: {e}"))?;
 
     w.flush().map_err(|e| format!("flush failed: {e}"))?;
 
@@ -821,8 +834,7 @@ mod tests {
     fn pty_spawn_rejects_duplicate_session_id() {
         let state = make_state();
 
-        let gen1 =
-            try_reserve_session_id(&state, "sid-A").expect("first reservation must succeed");
+        let gen1 = try_reserve_session_id(&state, "sid-A").expect("first reservation must succeed");
         assert_eq!(gen1, 1, "first allocated generation must be 1");
 
         let err = try_reserve_session_id(&state, "sid-A")
@@ -835,7 +847,10 @@ mod tests {
         // Original entry must still be present with generation 1.
         let map = state.map.lock().unwrap();
         let entry = map.get("sid-A").expect("original entry must remain in map");
-        assert_eq!(entry.generation, 1, "original entry's generation must be unchanged");
+        assert_eq!(
+            entry.generation, 1,
+            "original entry's generation must be unchanged"
+        );
     }
 
     /// A `pty_kill` with a stale generation must be a no-op — the session at the
@@ -854,9 +869,13 @@ mod tests {
         kill_with_generation(&state, "sid-B", Some(1));
 
         let map = state.map.lock().unwrap();
-        let entry =
-            map.get("sid-B").expect("session at generation 2 must survive a stale kill");
-        assert_eq!(entry.generation, 2, "generation 2 session must be untouched");
+        let entry = map
+            .get("sid-B")
+            .expect("session at generation 2 must survive a stale kill");
+        assert_eq!(
+            entry.generation, 2,
+            "generation 2 session must be untouched"
+        );
     }
 
     /// A `pty_kill` with the matching generation must remove the session.
@@ -869,7 +888,10 @@ mod tests {
         kill_with_generation(&state, "sid-C", Some(5));
 
         let map = state.map.lock().unwrap();
-        assert!(map.get("sid-C").is_none(), "session must be removed on matching generation");
+        assert!(
+            map.get("sid-C").is_none(),
+            "session must be removed on matching generation"
+        );
     }
 
     /// A `pty_kill` with `None` generation must remove the session unconditionally.
@@ -882,7 +904,10 @@ mod tests {
         kill_with_generation(&state, "sid-D", None);
 
         let map = state.map.lock().unwrap();
-        assert!(map.get("sid-D").is_none(), "session must be removed on None generation");
+        assert!(
+            map.get("sid-D").is_none(),
+            "session must be removed on None generation"
+        );
     }
 
     /// Tauri argument deserialisation contract: a JSON payload without a
@@ -937,7 +962,10 @@ mod tests {
             let original = std::env::var(key).ok();
             // Safety: single-threaded per `#[serial]` on every test in this module.
             unsafe { std::env::set_var(key, value) };
-            EnvGuard { key: key.to_string(), original }
+            EnvGuard {
+                key: key.to_string(),
+                original,
+            }
         }
 
         /// Save the current value of `key` and remove it.
@@ -945,7 +973,10 @@ mod tests {
             let original = std::env::var(key).ok();
             // Safety: single-threaded per `#[serial]` on every test in this module.
             unsafe { std::env::remove_var(key) };
-            EnvGuard { key: key.to_string(), original }
+            EnvGuard {
+                key: key.to_string(),
+                original,
+            }
         }
     }
 
@@ -1043,7 +1074,10 @@ mod tests {
     fn shell_kind_classifies_zsh_bash_and_other() {
         // zsh variants
         assert_eq!(ShellKind::from_shell_path("/bin/zsh"), ShellKind::Zsh);
-        assert_eq!(ShellKind::from_shell_path("/usr/local/bin/zsh"), ShellKind::Zsh);
+        assert_eq!(
+            ShellKind::from_shell_path("/usr/local/bin/zsh"),
+            ShellKind::Zsh
+        );
         assert_eq!(ShellKind::from_shell_path("zsh"), ShellKind::Zsh);
 
         // bash variants
@@ -1053,7 +1087,10 @@ mod tests {
         // Other shells
         assert_eq!(ShellKind::from_shell_path("/bin/fish"), ShellKind::Other);
         assert_eq!(ShellKind::from_shell_path("/bin/sh"), ShellKind::Other);
-        assert_eq!(ShellKind::from_shell_path("/usr/bin/dash"), ShellKind::Other);
+        assert_eq!(
+            ShellKind::from_shell_path("/usr/bin/dash"),
+            ShellKind::Other
+        );
         assert_eq!(ShellKind::from_shell_path(""), ShellKind::Other);
     }
 
