@@ -19,7 +19,13 @@ function renderNavBar(ui: ReactElement) {
 describe("NavBar", () => {
   it("renders empty state when no cards are provided", () => {
     renderNavBar(
-      <NavBar cards={[]} onAddCard={vi.fn()} onRemoveCard={vi.fn()} claudeContext={{}} shellContext={{}} />,
+      <NavBar
+        cards={[]}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        claudeContext={{}}
+        shellContext={{}}
+      />,
     );
 
     expect(screen.getByText("No cards yet")).toBeInTheDocument();
@@ -32,7 +38,8 @@ describe("NavBar", () => {
         cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }, { id: "12345678" }]}
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
-        claudeContext={{}} shellContext={{}}
+        claudeContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -47,7 +54,13 @@ describe("NavBar", () => {
     const user = userEvent.setup();
 
     renderNavBar(
-      <NavBar cards={[]} onAddCard={onAddCard} onRemoveCard={onRemoveCard} claudeContext={{}} shellContext={{}} />,
+      <NavBar
+        cards={[]}
+        onAddCard={onAddCard}
+        onRemoveCard={onRemoveCard}
+        claudeContext={{}}
+        shellContext={{}}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Add card" }));
@@ -65,7 +78,8 @@ describe("NavBar", () => {
         cards={[{ id: "a" }, { id: "b" }]}
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}} shellContext={{}}
+        claudeContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -84,7 +98,8 @@ describe("NavBar", () => {
         cards={[{ id: "a" }]}
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}} shellContext={{}}
+        claudeContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -105,7 +120,8 @@ describe("NavBar", () => {
         cards={[{ id: "a" }]}
         onAddCard={vi.fn()}
         onRemoveCard={onRemoveCard}
-        claudeContext={{}} shellContext={{}}
+        claudeContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -138,7 +154,8 @@ describe("NavBar", () => {
         cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }]}
         onAddCard={vi.fn()}
         onRemoveCard={vi.fn()}
-        claudeContext={{}} shellContext={{}}
+        claudeContext={{}}
+        shellContext={{}}
       />,
     );
 
@@ -171,7 +188,8 @@ describe("NavBar", () => {
           cards={[{ id: "a" }]}
           onAddCard={vi.fn()}
           onRemoveCard={onRemoveCard}
-          claudeContext={{}} shellContext={{}}
+          claudeContext={{}}
+          shellContext={{}}
         />
       </Tabs>,
     );

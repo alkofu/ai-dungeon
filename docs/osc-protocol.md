@@ -10,10 +10,10 @@ and OSC 7337 (git context) — and the two-slot card context model they feed int
 
 Each tab card holds two independent context slots:
 
-| Slot | Source OSC | TypeScript type | Contents |
-|------|------------|-----------------|----------|
-| ClaudeContext | 6800 | `ClaudeContext` | Full session snapshot from an AI CLI |
-| ShellContext | 7 + 7337 | `ShellContext` | Shell-derived CWD and git context |
+| Slot          | Source OSC | TypeScript type | Contents                             |
+| ------------- | ---------- | --------------- | ------------------------------------ |
+| ClaudeContext | 6800       | `ClaudeContext` | Full session snapshot from an AI CLI |
+| ShellContext  | 7 + 7337   | `ShellContext`  | Shell-derived CWD and git context    |
 
 **Rendering precedence** in `SessionCard.tsx`:
 
@@ -57,16 +57,16 @@ Encoded as `\033]6800;<json>\007`.
 All fields are validated by `parseSessionContextPayload()` in `src/types/sessionPayload.ts`
 before entering app state. The payload must be valid JSON, a plain object, and ≤ 64 KB.
 
-| Wire field | Required | Type | Constraints | Maps to `ClaudeContext` field |
-|---|---|---|---|---|
-| `SESSION_TS` | yes | string | Format `YYYYMMDD-HHMMSS` | `sessionTs` |
-| `SESSION_SLUG` | yes | string | 1–256 chars, no control chars | `slug` |
-| `WORKING_DIRECTORY` | yes | string | 1–1024 chars, no control chars | `workingDirectory` |
-| `BRANCH` | see note | string | 1–256 chars, no control chars | `branch` |
-| `WORKTREE` | see note | string | 1–256 chars, no control chars | `branch` (fallback) |
-| `REPO` | yes | string | `owner/name` format, no bare dots, no control chars | `repo` |
-| `PR_NUM` | no | number \| null | Positive integer ≥ 1, or omitted/null | `prNumber` |
-| `ISSUE_NUM` | no | number \| null | Positive integer ≥ 1, or omitted/null | `issueNumber` |
+| Wire field          | Required | Type           | Constraints                                         | Maps to `ClaudeContext` field |
+| ------------------- | -------- | -------------- | --------------------------------------------------- | ----------------------------- |
+| `SESSION_TS`        | yes      | string         | Format `YYYYMMDD-HHMMSS`                            | `sessionTs`                   |
+| `SESSION_SLUG`      | yes      | string         | 1–256 chars, no control chars                       | `slug`                        |
+| `WORKING_DIRECTORY` | yes      | string         | 1–1024 chars, no control chars                      | `workingDirectory`            |
+| `BRANCH`            | see note | string         | 1–256 chars, no control chars                       | `branch`                      |
+| `WORKTREE`          | see note | string         | 1–256 chars, no control chars                       | `branch` (fallback)           |
+| `REPO`              | yes      | string         | `owner/name` format, no bare dots, no control chars | `repo`                        |
+| `PR_NUM`            | no       | number \| null | Positive integer ≥ 1, or omitted/null               | `prNumber`                    |
+| `ISSUE_NUM`         | no       | number \| null | Positive integer ≥ 1, or omitted/null               | `issueNumber`                 |
 
 ### BRANCH vs WORKTREE
 
@@ -144,11 +144,11 @@ ESC ] 7337 ; BEL
 
 ### Three shapes
 
-| Shape | Data | Returned type | Effect |
-|---|---|---|---|
-| **Cleared** | `""` (empty string) | `{ branch: undefined, repo: undefined }` | Clears branch and repo in `ShellContext` |
-| **Bare name** | `<basename>\t<branch>` | `{ branch }` | Updates branch only; repo stays from previous OSC 6800 or unchanged |
-| **Owner/name** | `<owner>/<name>\t<branch>` | `{ branch, repo }` | Updates branch and repo |
+| Shape          | Data                       | Returned type                            | Effect                                                              |
+| -------------- | -------------------------- | ---------------------------------------- | ------------------------------------------------------------------- |
+| **Cleared**    | `""` (empty string)        | `{ branch: undefined, repo: undefined }` | Clears branch and repo in `ShellContext`                            |
+| **Bare name**  | `<basename>\t<branch>`     | `{ branch }`                             | Updates branch only; repo stays from previous OSC 6800 or unchanged |
+| **Owner/name** | `<owner>/<name>\t<branch>` | `{ branch, repo }`                       | Updates branch and repo                                             |
 
 The bare-name production case uses `basename "$repo_top"` — the short directory name of the
 repository root — because the shell may not have access to the full `owner/name` identity.
@@ -177,11 +177,11 @@ with an empty `workingDirectory` from being emitted.
 const meta = claudeContext ?? shellContext ?? getMockClaudeContext(cardId);
 ```
 
-| Scenario | Display source |
-|---|---|
-| Claude session active (OSC 6800 received) | `ClaudeContext` |
-| Shell context available, no Claude session | `ShellContext` |
-| Neither slot populated | Deterministic mock fixture (keyed by `cardId`) |
+| Scenario                                   | Display source                                 |
+| ------------------------------------------ | ---------------------------------------------- |
+| Claude session active (OSC 6800 received)  | `ClaudeContext`                                |
+| Shell context available, no Claude session | `ShellContext`                                 |
+| Neither slot populated                     | Deterministic mock fixture (keyed by `cardId`) |
 
 When `ShellContext` is the source, the slug row shows `"(shell)"` instead of a session slug,
 and `prNumber` / `issueNumber` are not shown (they only exist on `ClaudeContext`).
@@ -203,7 +203,7 @@ The following six steps describe the path from PTY output to rendered UI.
    `AppState.claudeContext[id]`; `setShellContext` stores a validated `ShellContext` in
    `AppState.shellContext[id]`. Both actions are no-ops if the card id is not in `state.cards`.
 6. **`SessionCard.tsx`** — re-renders with the new context, applying the `claudeContext ??
-   shellContext ?? mock` precedence to produce the displayed slug, branch, repo, and badges.
+shellContext ?? mock` precedence to produce the displayed slug, branch, repo, and badges.
 
 OSC handler disposables are cleaned up on `Terminal` unmount, before `term.dispose()`.
 
@@ -214,11 +214,11 @@ OSC handler disposables are cleaned up on `Terminal` unmount, before `term.dispo
 All OSC data is fully untrusted — any process running inside a terminal tab can emit these
 sequences. The single audit entry point is `src/types/sessionPayload.ts`, which exports:
 
-| Function | Validates | Returns on success |
-|---|---|---|
-| `parseSessionContextPayload` | OSC 6800 | `ClaudeContext` |
-| `parseOsc7Payload` | OSC 7 | `{ workingDirectory: string }` |
-| `parseOsc7337Payload` | OSC 7337 | branch/repo partial or cleared shape |
+| Function                     | Validates | Returns on success                   |
+| ---------------------------- | --------- | ------------------------------------ |
+| `parseSessionContextPayload` | OSC 6800  | `ClaudeContext`                      |
+| `parseOsc7Payload`           | OSC 7     | `{ workingDirectory: string }`       |
+| `parseOsc7337Payload`        | OSC 7337  | branch/repo partial or cleared shape |
 
 None of these functions throw. All guard failures return `null` and emit a `console.warn`
 in development mode only.
@@ -276,6 +276,7 @@ context until OSC 7337 (cleared payload) arrives. This is expected — the shell
 inconsistency within the same prompt cycle. No action is needed from the ai-tpk producer.
 
 The sequence of events is:
+
 1. OSC 7 fires with the new (non-git) CWD. The OSC 7 handler spreads the previous
    `branch`/`repo` from `lastShellContextRef` into the updated `ShellContext`, briefly
    showing stale git context alongside the new CWD.

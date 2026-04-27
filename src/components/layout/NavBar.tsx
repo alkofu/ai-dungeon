@@ -11,7 +11,13 @@ interface NavBarProps {
   shellContext: Record<string, ShellContext>;
 }
 
-export function NavBar({ cards, onAddCard, onRemoveCard, claudeContext, shellContext }: NavBarProps) {
+export function NavBar({
+  cards,
+  onAddCard,
+  onRemoveCard,
+  claudeContext,
+  shellContext,
+}: NavBarProps) {
   return (
     <>
       <Group justify="space-between">

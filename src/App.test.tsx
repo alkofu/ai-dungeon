@@ -298,7 +298,6 @@ describe("App", () => {
     expect(screen.getByText("backend-service")).toBeInTheDocument();
   });
 
-
   it("setShellContext populates state.shellContext[id] independently of state.claudeContext[id]", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
@@ -417,7 +416,6 @@ describe("appReducer", () => {
     const result = appReducer(state, { type: "remove", id: "card-1" });
     expect(result.claudeContext).not.toHaveProperty("card-1");
   });
-
 
   it("setShellContext stores ShellContext keyed by card id", () => {
     const state: AppState = {

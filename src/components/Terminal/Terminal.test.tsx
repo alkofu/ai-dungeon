@@ -545,10 +545,7 @@ describe("Terminal", () => {
 
   it("calls term.parser.registerOscHandler with 6800 and a function on mount", async () => {
     renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onClaudeContextChange={vi.fn()}
-      />,
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onClaudeContextChange={vi.fn()} />,
     );
     await vi.waitFor(() => {
       expect(registerOscHandlerSpy).toHaveBeenCalledWith(6800, expect.any(Function));
@@ -645,10 +642,7 @@ describe("Terminal", () => {
 
   it("OSC handler returns true", async () => {
     renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onClaudeContextChange={vi.fn()}
-      />,
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onClaudeContextChange={vi.fn()} />,
     );
 
     await vi.waitFor(() => {
@@ -1027,7 +1021,8 @@ describe("Terminal", () => {
     osc7337Handler("my-repo\tfeat/branch");
     return new Promise<void>((resolve) => {
       queueMicrotask(() => {
-        const lastCall = onShellContextChange.mock.calls[onShellContextChange.mock.calls.length - 1][0];
+        const lastCall =
+          onShellContextChange.mock.calls[onShellContextChange.mock.calls.length - 1][0];
         expect(lastCall.workingDirectory).toBe("/home/user/repo");
         expect(lastCall.branch).toBe("feat/branch");
         resolve();
@@ -1087,10 +1082,7 @@ describe("Terminal", () => {
 
   it("disposes OSC 6800, OSC 7, and OSC 7337 handlers on unmount before term.dispose()", async () => {
     const { unmount } = renderWithProviders(
-      <Terminal
-        sessionId="00000000-0000-0000-0000-000000000001"
-        onClaudeContextChange={vi.fn()}
-      />,
+      <Terminal sessionId="00000000-0000-0000-0000-000000000001" onClaudeContextChange={vi.fn()} />,
     );
 
     // Wait for OSC handlers to be registered (they are inside the font-load IIFE).
