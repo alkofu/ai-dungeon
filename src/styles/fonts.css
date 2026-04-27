@@ -1,0 +1,47 @@
+/*
+ * MesloLGS NF — Powerlevel10k-recommended Nerd Font, vendored under public/fonts/.
+ *
+ * font-display: block — defense-in-depth against regressions. The actual mechanism
+ * that prevents xterm from measuring against a fallback is the `await loadFonts()`
+ * call in Terminal.tsx, which runs BEFORE term.open(). If that await is bypassed by
+ * a future bug, `block` causes blank text for ~3s (visible failure) rather than
+ * fallback-font glyphs (silent regression). `swap` would invert this trade-off.
+ *
+ * This file must be imported at module scope from src/main.tsx so that the
+ * @font-face rules are in document.fonts before any component code executes.
+ * The @xterm/addon-web-fonts API: loadFonts(string[]) only resolves FontFace[]
+ * for rules already in document.fonts — without this module-scope import, the
+ * addon rejects with `'font family "MesloLGS NF" not registered in document.fonts'`.
+ */
+
+@font-face {
+  font-family: "MesloLGS NF";
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+  src: url("/fonts/MesloLGS NF Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "MesloLGS NF";
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+  src: url("/fonts/MesloLGS NF Bold.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "MesloLGS NF";
+  font-weight: 400;
+  font-style: italic;
+  font-display: block;
+  src: url("/fonts/MesloLGS NF Italic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "MesloLGS NF";
+  font-weight: 700;
+  font-style: italic;
+  font-display: block;
+  src: url("/fonts/MesloLGS NF Bold Italic.ttf") format("truetype");
+}

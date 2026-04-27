@@ -1,5 +1,6 @@
 import "@mantine/core/styles.css";
 import "@xterm/xterm/css/xterm.css";
+import "./styles/fonts.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { MantineProvider } from "@mantine/core";

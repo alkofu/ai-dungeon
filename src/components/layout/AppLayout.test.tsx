@@ -29,6 +29,16 @@ vi.mock("@xterm/addon-fit", () => {
   return { FitAddon: vi.fn().mockImplementation(MockFitAddon) };
 });
 
+vi.mock("@xterm/addon-web-fonts", () => {
+  const _vi = vi;
+  function MockWebFontsAddon() {
+    return {
+      loadFonts: _vi.fn().mockResolvedValue([{}]),
+    };
+  }
+  return { WebFontsAddon: vi.fn().mockImplementation(MockWebFontsAddon) };
+});
+
 // Default: pty_spawn resolves to numeric generation 1 (consistent with Step 5).
 // The existing flex-contract test renders AppLayout with no cards so invoke is
 // never called — this change is a no-op for that test.

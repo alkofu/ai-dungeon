@@ -130,6 +130,44 @@ pub struct PtyState {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
+/// Resolve a UTF-8 locale string for the PTY environment.
+///
+/// Priority order:
+/// 1. `LC_ALL` from the host environment — if it already ends with `.UTF-8`,
+///    `.utf-8`, `.UTF8`, or `.utf8` (standard `language_TERRITORY.codeset`
+///    suffix), pass it through unchanged (respects the user's configuration).
+/// 2. `LANG` from the host environment — if it ends with the same suffixes,
+///    promote it to `LC_ALL` (uses the host's UI locale).
+/// 3. Platform default: `en_US.UTF-8` on macOS (which does not ship `C.UTF-8`
+///    in the locale archive) or `C.UTF-8` on all other Unix targets.
+///
+/// Returns `String` (not `&'static str`) because the first two branches return
+/// dynamic values read from the process environment.
+fn resolve_pty_utf8_locale() -> String {
+    fn is_utf8_locale(v: &str) -> bool {
+        v.ends_with(".UTF-8") || v.ends_with(".utf-8") || v.ends_with(".UTF8") || v.ends_with(".utf8")
+    }
+
+    if let Ok(v) = std::env::var("LC_ALL") {
+        if is_utf8_locale(&v) {
+            return v;
+        }
+    }
+    if let Ok(v) = std::env::var("LANG") {
+        if is_utf8_locale(&v) {
+            return v;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "en_US.UTF-8".to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "C.UTF-8".to_string()
+    }
+}
+
 /// Reserve a `session_id` slot in the map **before** any I/O.
 ///
 /// Returns `Ok(generation)` when the slot is free; inserts a `Reserved`
@@ -210,6 +248,8 @@ pub async fn pty_spawn(
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        #[cfg(unix)]
+        cmd.env("LC_ALL", resolve_pty_utf8_locale());
 
         // Use HOME (Unix) / USERPROFILE (Windows) as the initial working directory.
         #[cfg(unix)]
@@ -487,6 +527,7 @@ pub fn pty_kill(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -536,6 +577,7 @@ mod tests {
     /// `Err("session already exists: …")` on the second call with the same sid,
     /// leaving the original generation-1 reservation intact.
     #[test]
+    #[serial]
     fn pty_spawn_rejects_duplicate_session_id() {
         let state = make_state();
 
@@ -559,6 +601,7 @@ mod tests {
     /// A `pty_kill` with a stale generation must be a no-op — the session at the
     /// newer generation must survive.
     #[test]
+    #[serial]
     fn pty_kill_with_stale_generation_is_noop() {
         let state = make_state();
 
@@ -578,6 +621,7 @@ mod tests {
 
     /// A `pty_kill` with the matching generation must remove the session.
     #[test]
+    #[serial]
     fn pty_kill_with_matching_generation_removes_session() {
         let state = make_state();
         insert_fake_session(&state, "sid-C", 5);
@@ -590,6 +634,7 @@ mod tests {
 
     /// A `pty_kill` with `None` generation must remove the session unconditionally.
     #[test]
+    #[serial]
     fn pty_kill_with_none_generation_removes_session() {
         let state = make_state();
         insert_fake_session(&state, "sid-D", 7);
@@ -606,6 +651,7 @@ mod tests {
     /// This validates plain serde behaviour (necessary but not sufficient — the
     /// authoritative gate is the Step 4 manual DevTools smoke test per Ruinor F-B).
     #[test]
+    #[serial]
     fn pty_kill_command_accepts_missing_generation_field() {
         #[derive(serde::Deserialize, Debug, PartialEq)]
         struct PtyKillArgs {
@@ -623,5 +669,128 @@ mod tests {
         let args = result.unwrap();
         assert_eq!(args.session_id, "X");
         assert_eq!(args.generation, None);
+    }
+
+    // ── Locale resolution tests ───────────────────────────────────────────────
+    //
+    // These tests mutate process-global env vars via `std::env::set_var` /
+    // `std::env::remove_var`. They are annotated `#[serial]` (along with all
+    // other tests in this module) to prevent parallel execution from producing
+    // env-var races. Annotating only the new tests would be insufficient because
+    // a new test could still race with an existing test scheduled concurrently.
+    //
+    // Each test uses `EnvGuard` to save and restore the original env-var value
+    // on drop, so a panicking assertion cannot leave the process env dirty for
+    // subsequent tests (R-DEF-2).
+
+    /// RAII guard that saves an env var's current value on construction and
+    /// restores it on drop. Ensures test-local mutations are always reversed,
+    /// even when the test panics.
+    struct EnvGuard {
+        key: String,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        /// Save the current value of `key` and set it to `value`.
+        fn set(key: &str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // Safety: single-threaded per `#[serial]` on every test in this module.
+            unsafe { std::env::set_var(key, value) };
+            EnvGuard { key: key.to_string(), original }
+        }
+
+        /// Save the current value of `key` and remove it.
+        fn remove(key: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // Safety: single-threaded per `#[serial]` on every test in this module.
+            unsafe { std::env::remove_var(key) };
+            EnvGuard { key: key.to_string(), original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // Safety: single-threaded per `#[serial]` on every test in this module.
+            match &self.original {
+                Some(v) => unsafe { std::env::set_var(&self.key, v) },
+                None => unsafe { std::env::remove_var(&self.key) },
+            }
+        }
+    }
+
+    /// When `LC_ALL` is already set to a UTF-8 locale, `resolve_pty_utf8_locale`
+    /// must return it unchanged (priority 1).
+    #[test]
+    #[serial]
+    fn resolve_pty_utf8_locale_returns_lc_all_when_utf8() {
+        let _lc_all = EnvGuard::set("LC_ALL", "en_GB.UTF-8");
+        let result = resolve_pty_utf8_locale();
+        assert_eq!(result, "en_GB.UTF-8");
+    }
+
+    /// A value that merely contains "UTF-8" as a substring (not as a
+    /// `.codeset` suffix) must NOT be treated as a UTF-8 locale — the resolver
+    /// must fall through to the platform default.
+    #[test]
+    #[serial]
+    fn resolve_pty_utf8_locale_rejects_substring_utf8_in_lc_all() {
+        let _lc_all = EnvGuard::set("LC_ALL", "utf-8-experiment");
+        let _lang = EnvGuard::remove("LANG");
+        let result = resolve_pty_utf8_locale();
+        // Must be the platform default, not the bogus LC_ALL value.
+        #[cfg(target_os = "macos")]
+        assert_eq!(result, "en_US.UTF-8");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(result, "C.UTF-8");
+    }
+
+    /// A value that merely contains "UTF-8" as a substring in LANG must also
+    /// be rejected; the resolver falls through to the platform default.
+    #[test]
+    #[serial]
+    fn resolve_pty_utf8_locale_rejects_substring_utf8_in_lang() {
+        let _lc_all = EnvGuard::remove("LC_ALL");
+        let _lang = EnvGuard::set("LANG", "my-UTF-8-experiment");
+        let result = resolve_pty_utf8_locale();
+        #[cfg(target_os = "macos")]
+        assert_eq!(result, "en_US.UTF-8");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(result, "C.UTF-8");
+    }
+
+    /// `.UTF8` (without hyphen) is also a valid codeset suffix and must be accepted.
+    #[test]
+    #[serial]
+    fn resolve_pty_utf8_locale_accepts_utf8_without_hyphen() {
+        let _lc_all = EnvGuard::set("LC_ALL", "en_US.UTF8");
+        let _lang = EnvGuard::remove("LANG");
+        let result = resolve_pty_utf8_locale();
+        assert_eq!(result, "en_US.UTF8");
+    }
+
+    /// When `LC_ALL` is absent or non-UTF-8 but `LANG` is a UTF-8 locale,
+    /// `resolve_pty_utf8_locale` must promote `LANG` (priority 2).
+    #[test]
+    #[serial]
+    fn resolve_pty_utf8_locale_promotes_lang_when_lc_all_missing() {
+        let _lc_all = EnvGuard::remove("LC_ALL");
+        let _lang = EnvGuard::set("LANG", "de_DE.UTF-8");
+        let result = resolve_pty_utf8_locale();
+        assert_eq!(result, "de_DE.UTF-8");
+    }
+
+    /// When neither `LC_ALL` nor `LANG` is set to a UTF-8 locale,
+    /// `resolve_pty_utf8_locale` must return the platform default (priority 3).
+    #[test]
+    #[serial]
+    fn resolve_pty_utf8_locale_falls_back_to_platform_default() {
+        let _lc_all = EnvGuard::remove("LC_ALL");
+        let _lang = EnvGuard::remove("LANG");
+        let result = resolve_pty_utf8_locale();
+        #[cfg(target_os = "macos")]
+        assert_eq!(result, "en_US.UTF-8");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(result, "C.UTF-8");
     }
 }
