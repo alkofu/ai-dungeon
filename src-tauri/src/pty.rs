@@ -236,6 +236,14 @@ impl ShellInjection {
 ///    normally do this from `$ZDOTDIR`; because we overrode `$ZDOTDIR`, we must
 ///    do it explicitly).
 /// 3. Append the polyglot that defines and wires `__ai_dungeon_emit_ctx`.
+//
+// Note: in-app terminal sessions are intentionally non-login interactive shells.
+// .zprofile and .zlogin are therefore not sourced (they apply to login shells only).
+//
+// Sourcing order note: when ZDOTDIR is overridden, zsh sources /etc/zshrc before
+// we source the user's ~/.zshenv (from inside this script). In normal operation,
+// ~/.zshenv runs before /etc/zshrc. If /etc/zshrc depends on a value set in
+// ~/.zshenv, that value will be absent. This is an accepted minor deviation.
 #[cfg(unix)]
 fn build_zsh_init_script(original_zdotdir: Option<&std::ffi::OsStr>) -> String {
     use std::os::unix::ffi::OsStrExt as _;
@@ -255,8 +263,8 @@ fn build_zsh_init_script(original_zdotdir: Option<&std::ffi::OsStr>) -> String {
 
     format!(
         "{zdotdir_clause}\
-[ -r \"$HOME/.zshenv\" ] && . \"$HOME/.zshenv\"\n\
-[ -r \"$HOME/.zshrc\" ] && . \"$HOME/.zshrc\"\n\
+[ -r \"${{ZDOTDIR:-$HOME}}/.zshenv\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshenv\"\n\
+[ -r \"${{ZDOTDIR:-$HOME}}/.zshrc\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshrc\"\n\
 {polyglot}",
         zdotdir_clause = zdotdir_clause,
         polyglot = SHELL_INIT_POLYGLOT,
@@ -269,6 +277,9 @@ fn build_zsh_init_script(original_zdotdir: Option<&std::ffi::OsStr>) -> String {
 /// 1. Source the user's `~/.bashrc` if it exists (bash with `--rcfile` reads
 ///    only the named file; `.bash_profile`/`.profile` are only for login shells).
 /// 2. Append the polyglot that defines and wires `__ai_dungeon_emit_ctx`.
+//
+// Note: in-app terminal sessions are intentionally non-login interactive shells.
+// .bash_profile and .profile are therefore not sourced (they apply to login shells only).
 #[cfg(unix)]
 fn build_bash_init_script() -> String {
     format!(
@@ -1114,12 +1125,12 @@ mod tests {
             ".zshrc must contain ZDOTDIR restore clause; got:\n{contents}"
         );
         assert!(
-            contents.contains("$HOME/.zshenv"),
-            ".zshrc must source $HOME/.zshenv; got:\n{contents}"
+            contents.contains("${ZDOTDIR:-$HOME}/.zshenv"),
+            ".zshrc must source ${{ZDOTDIR:-$HOME}}/.zshenv; got:\n{contents}"
         );
         assert!(
-            contents.contains("$HOME/.zshrc"),
-            ".zshrc must source $HOME/.zshrc; got:\n{contents}"
+            contents.contains("${ZDOTDIR:-$HOME}/.zshrc"),
+            ".zshrc must source ${{ZDOTDIR:-$HOME}}/.zshrc; got:\n{contents}"
         );
     }
 
