@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    ffi::OsString,
     io::{Read, Write},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -8,49 +9,49 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-#[cfg(unix)]
-use nix::sys::termios::{tcgetattr, tcdrain, tcsetattr, LocalFlags, SetArg};
-#[cfg(unix)]
-use std::os::fd::BorrowedFd;
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem as _};
 use tauri::{AppHandle, Emitter, State};
 
 // ── Shell init polyglot ───────────────────────────────────────────────────────
 //
-// This string is written verbatim to the PTY master immediately after spawn so
-// that the shell's line discipline queues it as stdin before the user's rc
-// files finish executing.
+// `SHELL_INIT_POLYGLOT` is the body that defines `__ai_dungeon_emit_ctx()` and
+// wires it into the prompt cycle for bash and zsh. It is embedded into a
+// per-session shell startup file at spawn time — never written to the PTY master
+// after the shell is running.
 //
-// Known limitation (rc-file race): the bytes are written before the shell has
-// read its rc file, relying on the TTY line discipline to buffer the input until
-// the shell is ready. This usually works, but a user's ~/.zshrc that does
+// Injection mechanism:
+//   • zsh  — `ShellInjection::prepare` creates a per-session tempdir, writes a
+//     `.zshrc` into it, and sets `ZDOTDIR` to that tempdir in the child's
+//     environment. zsh reads `$ZDOTDIR/.zshrc` as its interactive rc file; our
+//     `.zshrc` restores the user's original `ZDOTDIR`, sources their real
+//     `~/.zshenv` and `~/.zshrc`, then appends the polyglot. Because this all
+//     happens during rc-file evaluation — before ZLE (Z Line Editor) binds the
+//     keyboard — the polyglot bytes are never visible in the terminal.
+//   • bash — `ShellInjection::prepare` writes a `bash-init` file to the tempdir
+//     and passes `--rcfile <path>` to the `CommandBuilder`. bash reads only
+//     the named file as its interactive rc; our file sources the user's real
+//     `~/.bashrc` then appends the polyglot.
+//   • Other shells — injection is skipped; the shell starts with no extra args
+//     or env overrides. The polyglot's `$ZSH_VERSION`/`$BASH_VERSION` guards
+//     ensure it no-ops in those shells anyway.
+//
+// The `TempDir` inside `ShellInjection` is kept alive for the lifetime of the
+// session (held in `PtySessionState::Active::shell_init`) and dropped when
+// `pty_kill` removes the session — which removes the tempdir from the OS temp
+// directory. Best-effort cleanup: if `pty_kill` is not called (e.g. the app
+// crashes), the OS may reclaim the tempdir at next reboot.
+//
+// Known limitation (rc-file race): a user's ~/.zshrc that does
 // `precmd_functions=()` (bare assignment, not `+=`) would clobber our hook.
 // The mitigation is `add-zsh-hook` on zsh (deduplication-safe, append-style)
 // and `PROMPT_COMMAND` prepend on bash (safe against user appends, but not
 // against outright replacement with bare assignment).
 //
-// ECHO-window mitigation:
-// After `openpty`, the PTY's line discipline has ECHO enabled by default. The
-// spawned shell only clears ECHO once it has read its rc files and put the line
-// discipline into raw/cbreak mode for interactive editing. If we write the
-// polyglot in that window, the kernel echoes every byte back out the master, and
-// the frontend's xterm.js renders the polyglot text as visible garbage above the
-// first prompt. `with_echo_disabled` brackets the write with a tcgetattr /
-// ECHO-clear / tcsetattr(TCSANOW) / write / tcdrain / tcsetattr(restore)
-// sequence on the master FD so the slave never sees ECHO-on for our bytes. On
-// Linux and macOS, the master and slave PTY ends share a single line-discipline
-// termios object, so `tcgetattr`/`tcsetattr` against the master FD modifies the
-// same ECHO bit the slave sees — verified by portable-pty's own
-// `MasterPty::get_termios` implementation, which uses the same pattern. This
-// mitigation is best-effort: if any termios syscall fails, we log a warning and
-// proceed (the user sees the legacy echo behaviour, which is the pre-fix
-// baseline and therefore safe).
-//
 // The script:
 //   1. Defines __ai_dungeon_emit_ctx() which emits OSC 7 (CWD) and OSC 7337
 //      (git context) after every prompt.
 //   2. Wires the function into the prompt cycle for bash and zsh.
-//   3. Is a single newline-terminated line suitable for piping to a shell stdin.
+//   3. Is a single newline-terminated line suitable for embedding in an rc file.
 #[cfg(unix)]
 const SHELL_INIT_POLYGLOT: &str = concat!(
     // Define the context-emission function.
@@ -88,6 +89,206 @@ const SHELL_INIT_POLYGLOT: &str = concat!(
     "fi\n",
 );
 
+// ── Shell-startup injection ───────────────────────────────────────────────────
+
+/// Which shell family the spawned process belongs to.
+///
+/// Determined by the basename of the shell path passed to `pty_spawn`. Only
+/// `zsh` and `bash` receive injection; all other shells are `Other`.
+#[derive(Debug, PartialEq)]
+enum ShellKind {
+    Zsh,
+    Bash,
+    Other,
+}
+
+impl ShellKind {
+    /// Classify a shell path by its basename. Case-sensitive (matches macOS and
+    /// Linux conventions where shell binaries are always lowercase).
+    fn from_shell_path(shell: &str) -> Self {
+        match std::path::Path::new(shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+        {
+            Some("zsh") => ShellKind::Zsh,
+            Some("bash") => ShellKind::Bash,
+            _ => ShellKind::Other,
+        }
+    }
+}
+
+/// Per-session shell-startup injection state.
+///
+/// Owns a `TempDir` that is kept alive for the session lifetime. When this
+/// struct is dropped (i.e. when `PtySessionState::Active` is dropped at
+/// `pty_kill` time), the `TempDir` is removed from the filesystem.
+///
+/// `extra_args` and `extra_env` are applied to `CommandBuilder` in `pty_spawn`.
+pub(crate) struct ShellInjection {
+    /// The tempdir that holds the generated rc file. Kept alive so the shell
+    /// can re-source it if desired (rare, but harmless to support).
+    #[allow(dead_code)]
+    _tempdir: tempfile::TempDir,
+    /// Extra command-line arguments to pass to the shell. For bash, this is
+    /// `["--rcfile", "<tempdir>/bash-init"]`. For zsh and other shells: empty.
+    extra_args: Vec<OsString>,
+    /// Extra environment variables to set on the child process. For zsh, this
+    /// is `[("ZDOTDIR", "<tempdir>")]`. For bash and other shells: empty.
+    extra_env: Vec<(OsString, OsString)>,
+}
+
+impl ShellInjection {
+    /// Create a per-session injection for `shell`.
+    ///
+    /// Creates a fresh `TempDir`, writes the appropriate startup file into it,
+    /// and returns the `ShellInjection` with populated `extra_args`/`extra_env`.
+    ///
+    /// On I/O failure, returns `Err` with a human-readable message so the caller
+    /// can soft-fail (log a warning and proceed without injection).
+    #[cfg(unix)]
+    fn prepare(shell: &str) -> Result<Self, String> {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let tempdir = tempfile::Builder::new()
+            .prefix("ai-dungeon-shell-init-")
+            .tempdir()
+            .map_err(|e| format!("shell-init injection failed: {e}"))?;
+
+        match ShellKind::from_shell_path(shell) {
+            ShellKind::Zsh => {
+                // Capture the user's current ZDOTDIR (may be unset).
+                let original_zdotdir = std::env::var_os("ZDOTDIR");
+
+                let script = build_zsh_init_script(original_zdotdir.as_deref());
+
+                let rc_path = tempdir.path().join(".zshrc");
+                std::fs::OpenOptions::new()
+                    .mode(0o600)
+                    .create_new(true)
+                    .write(true)
+                    .open(&rc_path)
+                    .and_then(|mut f| {
+                        use std::io::Write as _;
+                        f.write_all(script.as_bytes())
+                    })
+                    .map_err(|e| format!("shell-init injection failed: {e}"))?;
+
+                let zdotdir_val: OsString = tempdir.path().into();
+                Ok(ShellInjection {
+                    _tempdir: tempdir,
+                    extra_args: vec![],
+                    extra_env: vec![(OsString::from("ZDOTDIR"), zdotdir_val)],
+                })
+            }
+            ShellKind::Bash => {
+                let script = build_bash_init_script();
+
+                let init_path = tempdir.path().join("bash-init");
+                std::fs::OpenOptions::new()
+                    .mode(0o600)
+                    .create_new(true)
+                    .write(true)
+                    .open(&init_path)
+                    .and_then(|mut f| {
+                        use std::io::Write as _;
+                        f.write_all(script.as_bytes())
+                    })
+                    .map_err(|e| format!("shell-init injection failed: {e}"))?;
+
+                let rcfile_path: OsString = init_path.into();
+                Ok(ShellInjection {
+                    _tempdir: tempdir,
+                    extra_args: vec![OsString::from("--rcfile"), rcfile_path],
+                    extra_env: vec![],
+                })
+            }
+            ShellKind::Other => Ok(ShellInjection {
+                _tempdir: tempdir,
+                extra_args: vec![],
+                extra_env: vec![],
+            }),
+        }
+    }
+
+    /// No-op injection for non-Unix targets (Windows).
+    #[cfg(not(unix))]
+    fn prepare(_shell: &str) -> Result<Self, String> {
+        // tempfile::TempDir still works on Windows; we just don't inject anything.
+        let tempdir = tempfile::Builder::new()
+            .prefix("ai-dungeon-shell-init-")
+            .tempdir()
+            .map_err(|e| format!("shell-init injection failed: {e}"))?;
+        Ok(ShellInjection {
+            _tempdir: tempdir,
+            extra_args: vec![],
+            extra_env: vec![],
+        })
+    }
+}
+
+/// Build the content of the zsh `.zshrc` written to the per-session tempdir.
+///
+/// Structure (in order):
+/// 1. Restore the user's original `ZDOTDIR` so their real `~/.zshrc` sees the
+///    same value it would have without our injection. Uses base64 encoding to
+///    avoid all shell metacharacter pitfalls (quotes, `$`, backticks, newlines).
+/// 2. Source the user's `~/.zshenv` and `~/.zshrc` if they exist (zsh would
+///    normally do this from `$ZDOTDIR`; because we overrode `$ZDOTDIR`, we must
+///    do it explicitly).
+/// 3. Append the polyglot that defines and wires `__ai_dungeon_emit_ctx`.
+//
+// Note: in-app terminal sessions are intentionally non-login interactive shells.
+// .zprofile and .zlogin are therefore not sourced (they apply to login shells only).
+//
+// Sourcing order note: when ZDOTDIR is overridden, zsh sources /etc/zshrc before
+// we source the user's ~/.zshenv (from inside this script). In normal operation,
+// ~/.zshenv runs before /etc/zshrc. If /etc/zshrc depends on a value set in
+// ~/.zshenv, that value will be absent. This is an accepted minor deviation.
+#[cfg(unix)]
+fn build_zsh_init_script(original_zdotdir: Option<&std::ffi::OsStr>) -> String {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let zdotdir_clause = match original_zdotdir {
+        Some(v) => {
+            // Encode the raw bytes as standard base64 — handles arbitrary byte
+            // sequences including spaces, quotes, $, backticks, and newlines.
+            let encoded = B64.encode(v.as_bytes());
+            format!(
+                "export ZDOTDIR=\"$(printf '%s' '{encoded}' | base64 -d)\"\n",
+                encoded = encoded
+            )
+        }
+        None => "unset ZDOTDIR\n".to_string(),
+    };
+
+    format!(
+        "{zdotdir_clause}\
+[ -r \"${{ZDOTDIR:-$HOME}}/.zshenv\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshenv\"\n\
+[ -r \"${{ZDOTDIR:-$HOME}}/.zshrc\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshrc\"\n\
+{polyglot}",
+        zdotdir_clause = zdotdir_clause,
+        polyglot = SHELL_INIT_POLYGLOT,
+    )
+}
+
+/// Build the content of the bash `bash-init` file written to the per-session tempdir.
+///
+/// Structure (in order):
+/// 1. Source the user's `~/.bashrc` if it exists (bash with `--rcfile` reads
+///    only the named file; `.bash_profile`/`.profile` are only for login shells).
+/// 2. Append the polyglot that defines and wires `__ai_dungeon_emit_ctx`.
+//
+// Note: in-app terminal sessions are intentionally non-login interactive shells.
+// .bash_profile and .profile are therefore not sourced (they apply to login shells only).
+#[cfg(unix)]
+fn build_bash_init_script() -> String {
+    format!(
+        "[ -r \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
+{polyglot}",
+        polyglot = SHELL_INIT_POLYGLOT,
+    )
+}
+
 // ── Session ──────────────────────────────────────────────────────────────────
 
 /// Distinguishes a reserved-but-not-yet-spawned session from a fully active one.
@@ -116,6 +317,11 @@ pub enum PtySessionState {
         /// NOTE: `Box<dyn portable_pty::Child + Send>` — `+ Sync` is NOT required
         /// and WILL fail to compile. Do not add `+ Sync` here.
         child: Arc<Mutex<Box<dyn portable_pty::Child + Send>>>,
+        /// Holds the per-session tempdir for the shell-init injection.
+        /// Dropping this removes the tempdir; kept alive for the session lifetime
+        /// so the shell can re-source files if it chooses to (rare, but harmless).
+        #[allow(dead_code)]
+        shell_init: ShellInjection,
     },
 }
 
@@ -166,7 +372,10 @@ pub struct PtyState {
 /// dynamic values read from the process environment.
 fn resolve_pty_utf8_locale() -> String {
     fn is_utf8_locale(v: &str) -> bool {
-        v.ends_with(".UTF-8") || v.ends_with(".utf-8") || v.ends_with(".UTF8") || v.ends_with(".utf8")
+        v.ends_with(".UTF-8")
+            || v.ends_with(".utf-8")
+            || v.ends_with(".UTF8")
+            || v.ends_with(".utf8")
     }
 
     if let Ok(v) = std::env::var("LC_ALL") {
@@ -189,78 +398,6 @@ fn resolve_pty_utf8_locale() -> String {
     }
 }
 
-/// Run `body` with the PTY master's termios `ECHO` flag temporarily cleared.
-///
-/// Saves the current termios via `tcgetattr`, clears `ECHO`, applies via
-/// `tcsetattr(TCSANOW)`, runs `body`, calls `tcdrain` so the slave has
-/// consumed any bytes `body` wrote, then restores the original termios.
-///
-/// On Linux and macOS, the master and slave PTY ends share a single
-/// line-discipline termios object, so `tcgetattr`/`tcsetattr` against the
-/// master FD modifies the same ECHO bit the slave sees — verified by
-/// portable-pty's own `MasterPty::get_termios` implementation, which uses
-/// the same pattern.
-///
-/// Note: `tcdrain` on a PTY master returns once the slave-side line
-/// discipline has accepted the bytes (not waiting for user-space shell to
-/// consume them), so it cannot deadlock against a not-yet-exec'd shell.
-///
-/// Failure-branch matrix — every termios syscall soft-fails:
-/// - (a) `tcgetattr` fails → log, run body anyway, skip drain, skip restore.
-///   The caller sees the legacy echo behaviour (pre-fix baseline), safe.
-/// - (b) `tcgetattr` ok, clear-`tcsetattr` fails → log, run body, skip drain,
-///   skip restore (state was never modified).
-/// - (c) `tcgetattr` ok, clear ok, body completes, `tcdrain` fails → log,
-///   still attempt restore.
-/// - (d) `tcgetattr` ok, clear ok, drain ok, restore-`tcsetattr` fails → log only.
-/// - (e) All-success → normal path.
-///
-/// This mitigation is best-effort: a termios failure logs a warning and
-/// proceeds without short-circuiting `body` or leaving the master in an
-/// unknown state.
-#[cfg(unix)]
-fn with_echo_disabled<F: FnOnce()>(master_fd: std::os::unix::io::RawFd, body: F) {
-    // SAFETY: We borrow (not own) the FD that portable-pty holds. BorrowedFd
-    // never closes the underlying file descriptor on drop.
-    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
-
-    // Branch (a): tcgetattr fails — run body, skip drain and restore.
-    let original = match tcgetattr(fd) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[ai-dungeon] termios tcgetattr failed: {e}");
-            body();
-            return;
-        }
-    };
-
-    let mut modified = original.clone();
-    modified.local_flags.remove(LocalFlags::ECHO);
-
-    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
-
-    // Branch (b): clear-tcsetattr fails — run body, skip drain and restore.
-    if let Err(e) = tcsetattr(fd, SetArg::TCSANOW, &modified) {
-        eprintln!("[ai-dungeon] termios tcsetattr (clear ECHO) failed: {e}");
-        body();
-        return;
-    }
-
-    body();
-
-    // Branch (c): tcdrain fails — log but still attempt restore.
-    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
-    if let Err(e) = tcdrain(fd) {
-        eprintln!("[ai-dungeon] termios tcdrain failed: {e}");
-    }
-
-    // Branch (d): restore-tcsetattr fails — log only.
-    let fd = unsafe { BorrowedFd::borrow_raw(master_fd) };
-    if let Err(e) = tcsetattr(fd, SetArg::TCSANOW, &original) {
-        eprintln!("[ai-dungeon] termios tcsetattr (restore ECHO) failed: {e}");
-    }
-}
-
 /// Reserve a `session_id` slot in the map **before** any I/O.
 ///
 /// Returns `Ok(generation)` when the slot is free; inserts a `Reserved`
@@ -271,7 +408,10 @@ fn with_echo_disabled<F: FnOnce()>(master_fd: std::os::unix::io::RawFd, body: F)
 /// `pty_spawn` calls this as its **first** action so that duplicate-spawn
 /// detection is cheap and requires no shell process to have been started.
 fn try_reserve_session_id(state: &PtyState, session_id: &str) -> Result<u64, String> {
-    let mut map = state.map.lock().map_err(|_| "state mutex poisoned".to_string())?;
+    let mut map = state
+        .map
+        .lock()
+        .map_err(|_| "state mutex poisoned".to_string())?;
 
     if map.contains_key(session_id) {
         return Err(format!("session already exists: {session_id}"));
@@ -318,8 +458,37 @@ pub async fn pty_spawn(
     let generation = try_reserve_session_id(&state, &session_id)?;
 
     // ── Step 2: all I/O; on any failure, free the reservation ─────────────────
-    #[allow(clippy::type_complexity)]
-    let result = (|| -> Result<(Arc<Mutex<Box<dyn MasterPty + Send>>>, Box<dyn Write + Send>, Box<dyn portable_pty::Child + Send>, Box<dyn Read + Send>, i32), String> {
+
+    // Resolve the default shell before the closure so the injection can also use it.
+    #[cfg(unix)]
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+    #[cfg(windows)]
+    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
+
+    // Prepare the per-session shell-startup injection. On failure, log and
+    // proceed with a no-op injection (same baseline as the pre-feature behaviour).
+    let shell_init = ShellInjection::prepare(&shell).unwrap_or_else(|e| {
+        eprintln!("[ai-dungeon] shell-init injection prepare failed: {e}");
+        // Build a fallback no-op injection by creating a fresh TempDir. If even
+        // that fails, panic — we cannot continue without a valid ShellInjection.
+        ShellInjection {
+            _tempdir: tempfile::Builder::new()
+                .prefix("ai-dungeon-shell-init-fallback-")
+                .tempdir()
+                .expect("tempfile::TempDir fallback must succeed"),
+            extra_args: vec![],
+            extra_env: vec![],
+        }
+    });
+
+    struct SpawnResult {
+        master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+        writer: Box<dyn Write + Send>,
+        child: Box<dyn portable_pty::Child + Send>,
+        reader: Box<dyn Read + Send>,
+    }
+
+    let result = (|| -> Result<SpawnResult, String> {
         let pty_system = NativePtySystem::default();
 
         let size = PtySize {
@@ -333,17 +502,18 @@ pub async fn pty_spawn(
             .openpty(size)
             .map_err(|e| format!("openpty failed: {e}"))?;
 
-        // Resolve the default shell.
-        #[cfg(unix)]
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-        #[cfg(windows)]
-        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
-
         let mut cmd = CommandBuilder::new(&shell);
+
+        // App-mandated env entries — must come first.
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         #[cfg(unix)]
         cmd.env("LC_ALL", resolve_pty_utf8_locale());
+
+        // Injection env entries — after the app-mandated block.
+        for (key, val) in &shell_init.extra_env {
+            cmd.env(key, val);
+        }
 
         // Use HOME (Unix) / USERPROFILE (Windows) as the initial working directory.
         #[cfg(unix)]
@@ -355,6 +525,11 @@ pub async fn pty_spawn(
             cmd.cwd(profile);
         }
 
+        // Injection args (e.g. --rcfile for bash).
+        for arg in &shell_init.extra_args {
+            cmd.arg(arg);
+        }
+
         // M-1: Take the writer from the BARE master FIRST, before wrapping master
         // in Arc<Mutex<>>. The writer borrow requires exclusive access to the pair
         // slot; wrapping first would move master before we can call take_writer().
@@ -362,14 +537,6 @@ pub async fn pty_spawn(
             .master
             .take_writer()
             .map_err(|e| format!("take_writer failed: {e}"))?;
-
-        // Capture the raw FD before pair.master is moved into Arc<Mutex<>>.
-        // On Unix, MasterPty::as_raw_fd() always returns Some; -1 is a safe
-        // sentinel that will cause with_echo_disabled to soft-fail gracefully.
-        #[cfg(unix)]
-        let master_fd: i32 = pair.master.as_raw_fd().unwrap_or(-1);
-        #[cfg(not(unix))]
-        let master_fd: i32 = -1;
 
         // Now wrap master in Arc<Mutex<>> for shared resize access.
         let master = Arc::new(Mutex::new(pair.master));
@@ -388,7 +555,12 @@ pub async fn pty_spawn(
             .try_clone_reader()
             .map_err(|e| format!("failed to clone reader: {e}"))?;
 
-        Ok((master, writer, child, reader, master_fd))
+        Ok(SpawnResult {
+            master,
+            writer,
+            child,
+            reader,
+        })
     })();
 
     match result {
@@ -399,34 +571,13 @@ pub async fn pty_spawn(
             }
             return Err(e);
         }
-        Ok((master, mut writer, child, reader, master_fd)) => {
+        Ok(SpawnResult {
+            master,
+            writer,
+            child,
+            reader,
+        }) => {
             let shutdown = Arc::new(AtomicBool::new(false));
-
-            // Inject the shell init polyglot on Unix so bash/zsh emit OSC 7 (CWD) and
-            // OSC 7337 (git context) after every prompt cycle. We write to the bare
-            // `writer` binding here — before it is wrapped in `Arc<Mutex<>>` and inserted
-            // into the map — so the write is uncontended and cannot race with `pty_write`,
-            // `pty_kill`, or a remount-spawn on the same sid (the session is still
-            // unreachable from any other code path at this point).
-            //
-            // `with_echo_disabled` brackets the write with a save/clear/`tcdrain`/restore
-            // sequence on the master FD to prevent the kernel from echoing the polyglot
-            // bytes back to the frontend before the shell has put the line discipline into
-            // its interactive (non-echoing) mode. See the ECHO-window mitigation comment
-            // above `SHELL_INIT_POLYGLOT` for details.
-            //
-            // Failure modes handled by `with_echo_disabled` (soft-fail on all):
-            //   1. tcgetattr fails  — body runs with echo still enabled (legacy behaviour).
-            //   2. tcsetattr fails  — body runs with echo still enabled (state unmodified).
-            //   3. write/flush fail — logged; the session continues without OSC context.
-            #[cfg(unix)]
-            with_echo_disabled(master_fd, || {
-                if let Err(e) = writer.write_all(SHELL_INIT_POLYGLOT.as_bytes()) {
-                    eprintln!("[ai-dungeon] shell init injection write failed: {e}");
-                } else if let Err(e) = writer.flush() {
-                    eprintln!("[ai-dungeon] shell init injection flush failed: {e}");
-                }
-            });
 
             // Replace the Reserved placeholder with the fully-constructed Active session.
             let session = Arc::new(PtySession {
@@ -434,6 +585,7 @@ pub async fn pty_spawn(
                     master: Arc::clone(&master),
                     writer: Arc::new(Mutex::new(writer)),
                     child: Arc::new(Mutex::new(child)),
+                    shell_init,
                 },
                 shutdown: Arc::clone(&shutdown),
                 generation,
@@ -520,7 +672,8 @@ pub fn pty_write(
 
     let mut w = writer.lock().map_err(|_| "writer mutex poisoned")?;
 
-    w.write_all(&bytes).map_err(|e| format!("write failed: {e}"))?;
+    w.write_all(&bytes)
+        .map_err(|e| format!("write failed: {e}"))?;
 
     w.flush().map_err(|e| format!("flush failed: {e}"))?;
 
@@ -616,6 +769,8 @@ pub fn pty_kill(
 
     // Kill the child process and reap it. Only meaningful for Active sessions;
     // Reserved placeholders have no child process.
+    // Dropping the session (including PtySessionState::Active::shell_init) also
+    // removes the per-session tempdir from the filesystem.
     if let PtySessionState::Active { child, .. } = &session.state {
         if let Ok(mut c) = child.lock() {
             let _ = c.kill();
@@ -690,8 +845,7 @@ mod tests {
     fn pty_spawn_rejects_duplicate_session_id() {
         let state = make_state();
 
-        let gen1 =
-            try_reserve_session_id(&state, "sid-A").expect("first reservation must succeed");
+        let gen1 = try_reserve_session_id(&state, "sid-A").expect("first reservation must succeed");
         assert_eq!(gen1, 1, "first allocated generation must be 1");
 
         let err = try_reserve_session_id(&state, "sid-A")
@@ -704,7 +858,10 @@ mod tests {
         // Original entry must still be present with generation 1.
         let map = state.map.lock().unwrap();
         let entry = map.get("sid-A").expect("original entry must remain in map");
-        assert_eq!(entry.generation, 1, "original entry's generation must be unchanged");
+        assert_eq!(
+            entry.generation, 1,
+            "original entry's generation must be unchanged"
+        );
     }
 
     /// A `pty_kill` with a stale generation must be a no-op — the session at the
@@ -723,9 +880,13 @@ mod tests {
         kill_with_generation(&state, "sid-B", Some(1));
 
         let map = state.map.lock().unwrap();
-        let entry =
-            map.get("sid-B").expect("session at generation 2 must survive a stale kill");
-        assert_eq!(entry.generation, 2, "generation 2 session must be untouched");
+        let entry = map
+            .get("sid-B")
+            .expect("session at generation 2 must survive a stale kill");
+        assert_eq!(
+            entry.generation, 2,
+            "generation 2 session must be untouched"
+        );
     }
 
     /// A `pty_kill` with the matching generation must remove the session.
@@ -738,7 +899,10 @@ mod tests {
         kill_with_generation(&state, "sid-C", Some(5));
 
         let map = state.map.lock().unwrap();
-        assert!(map.get("sid-C").is_none(), "session must be removed on matching generation");
+        assert!(
+            map.get("sid-C").is_none(),
+            "session must be removed on matching generation"
+        );
     }
 
     /// A `pty_kill` with `None` generation must remove the session unconditionally.
@@ -751,7 +915,10 @@ mod tests {
         kill_with_generation(&state, "sid-D", None);
 
         let map = state.map.lock().unwrap();
-        assert!(map.get("sid-D").is_none(), "session must be removed on None generation");
+        assert!(
+            map.get("sid-D").is_none(),
+            "session must be removed on None generation"
+        );
     }
 
     /// Tauri argument deserialisation contract: a JSON payload without a
@@ -806,7 +973,10 @@ mod tests {
             let original = std::env::var(key).ok();
             // Safety: single-threaded per `#[serial]` on every test in this module.
             unsafe { std::env::set_var(key, value) };
-            EnvGuard { key: key.to_string(), original }
+            EnvGuard {
+                key: key.to_string(),
+                original,
+            }
         }
 
         /// Save the current value of `key` and remove it.
@@ -814,7 +984,10 @@ mod tests {
             let original = std::env::var(key).ok();
             // Safety: single-threaded per `#[serial]` on every test in this module.
             unsafe { std::env::remove_var(key) };
-            EnvGuard { key: key.to_string(), original }
+            EnvGuard {
+                key: key.to_string(),
+                original,
+            }
         }
     }
 
@@ -903,89 +1076,202 @@ mod tests {
         assert_eq!(result, "C.UTF-8");
     }
 
-    // ── with_echo_disabled tests ──────────────────────────────────────────────
+    // ── Shell injection tests ─────────────────────────────────────────────────
 
-    /// `with_echo_disabled` must clear ECHO inside the body and restore it after.
-    ///
-    /// Opens a real PTY pair via `nix::pty::openpty`, asserts ECHO is initially
-    /// set on the master, calls `with_echo_disabled` with a body that reads back
-    /// termios to assert ECHO is cleared, then asserts ECHO is restored after the
-    /// call returns.
+    /// `ShellKind::from_shell_path` must classify zsh and bash paths correctly,
+    /// and return `Other` for all unrecognised shells.
+    #[test]
+    #[serial]
+    fn shell_kind_classifies_zsh_bash_and_other() {
+        // zsh variants
+        assert_eq!(ShellKind::from_shell_path("/bin/zsh"), ShellKind::Zsh);
+        assert_eq!(
+            ShellKind::from_shell_path("/usr/local/bin/zsh"),
+            ShellKind::Zsh
+        );
+        assert_eq!(ShellKind::from_shell_path("zsh"), ShellKind::Zsh);
+
+        // bash variants
+        assert_eq!(ShellKind::from_shell_path("/bin/bash"), ShellKind::Bash);
+        assert_eq!(ShellKind::from_shell_path("bash"), ShellKind::Bash);
+
+        // Other shells
+        assert_eq!(ShellKind::from_shell_path("/bin/fish"), ShellKind::Other);
+        assert_eq!(ShellKind::from_shell_path("/bin/sh"), ShellKind::Other);
+        assert_eq!(
+            ShellKind::from_shell_path("/usr/bin/dash"),
+            ShellKind::Other
+        );
+        assert_eq!(ShellKind::from_shell_path(""), ShellKind::Other);
+    }
+
+    /// `ShellInjection::prepare("/bin/zsh")` must write a `.zshrc` in the tempdir
+    /// that contains `__ai_dungeon_emit_ctx`, `ZDOTDIR`, `$HOME/.zshenv`, and
+    /// `$HOME/.zshrc`.
     #[cfg(unix)]
     #[test]
     #[serial]
-    fn with_echo_disabled_clears_and_restores_echo() {
-        use nix::pty::openpty;
-        use nix::sys::termios::{tcgetattr, LocalFlags};
-        use std::os::fd::{AsFd, AsRawFd};
-
-        let pty = openpty(None, None).expect("openpty must succeed in test");
-        let master_fd_raw = pty.master.as_fd().as_raw_fd();
-
-        // ECHO must be set initially (post-openpty default).
-        let initial = tcgetattr(pty.master.as_fd()).expect("tcgetattr must succeed on fresh PTY");
+    fn shell_injection_prepare_zsh_writes_zshrc() {
+        let inj = ShellInjection::prepare("/bin/zsh").expect("prepare must succeed");
+        let rc_path = inj._tempdir.path().join(".zshrc");
+        assert!(rc_path.exists(), ".zshrc must exist in the tempdir");
+        let contents = std::fs::read_to_string(&rc_path).expect("must be readable");
         assert!(
-            initial.local_flags.contains(LocalFlags::ECHO),
-            "ECHO must be set on a freshly opened PTY master"
+            contents.contains("__ai_dungeon_emit_ctx"),
+            ".zshrc must contain __ai_dungeon_emit_ctx; got:\n{contents}"
         );
-
-        let mut echo_inside = true; // assume cleared; body will correct this
-        with_echo_disabled(master_fd_raw, || {
-            let t = tcgetattr(pty.master.as_fd()).expect("tcgetattr inside body must succeed");
-            echo_inside = t.local_flags.contains(LocalFlags::ECHO);
-        });
-
-        assert!(!echo_inside, "ECHO must be cleared inside the body");
-
-        // ECHO must be restored after with_echo_disabled returns.
-        let after = tcgetattr(pty.master.as_fd()).expect("tcgetattr after body must succeed");
         assert!(
-            after.local_flags.contains(LocalFlags::ECHO),
-            "ECHO must be restored after with_echo_disabled returns"
+            contents.contains("ZDOTDIR"),
+            ".zshrc must contain ZDOTDIR restore clause; got:\n{contents}"
+        );
+        assert!(
+            contents.contains("${ZDOTDIR:-$HOME}/.zshenv"),
+            ".zshrc must source ${{ZDOTDIR:-$HOME}}/.zshenv; got:\n{contents}"
+        );
+        assert!(
+            contents.contains("${ZDOTDIR:-$HOME}/.zshrc"),
+            ".zshrc must source ${{ZDOTDIR:-$HOME}}/.zshrc; got:\n{contents}"
         );
     }
 
-    /// `with_echo_disabled` must still run the body when `tcgetattr` fails (soft-fail
-    /// branch (a)). Using an FD that is guaranteed to be closed forces `EBADF`.
+    /// `ShellInjection::prepare("/bin/bash")` must write a `bash-init` in the
+    /// tempdir that contains `__ai_dungeon_emit_ctx` and the `.bashrc` source
+    /// guard.
     #[cfg(unix)]
     #[test]
     #[serial]
-    fn with_echo_disabled_runs_body_when_tcgetattr_fails() {
-        use std::cell::Cell;
-        use std::os::unix::io::IntoRawFd;
-
-        // Open a file, extract its raw FD, then explicitly close it.
-        // The resulting FD value is now invalid (EBADF), exercising branch (a).
-        let file = std::fs::File::open("/dev/null").expect("open /dev/null must succeed");
-        let invalid_fd = file.into_raw_fd();
-        // Explicitly close the fd so it becomes invalid (EBADF).
-        // nix::unistd::close is available unconditionally (unistd mod is not feature-gated).
-        let _ = nix::unistd::close(invalid_fd);
-
-        let body_ran = Cell::new(false);
-        with_echo_disabled(invalid_fd, || {
-            body_ran.set(true);
-        });
-        assert!(body_ran.get(), "body must run even when tcgetattr fails (soft-fail)");
+    fn shell_injection_prepare_bash_writes_init_file() {
+        let inj = ShellInjection::prepare("/bin/bash").expect("prepare must succeed");
+        let init_path = inj._tempdir.path().join("bash-init");
+        assert!(init_path.exists(), "bash-init must exist in the tempdir");
+        let contents = std::fs::read_to_string(&init_path).expect("must be readable");
+        assert!(
+            contents.contains("__ai_dungeon_emit_ctx"),
+            "bash-init must contain __ai_dungeon_emit_ctx; got:\n{contents}"
+        );
+        assert!(
+            contents.contains("[ -r \"$HOME/.bashrc\" ]"),
+            "bash-init must contain .bashrc source guard; got:\n{contents}"
+        );
     }
 
-    /// `with_echo_disabled` must still run the body when the FD is a regular file
-    /// (i.e., not a TTY). `tcgetattr` returns `ENOTTY`, exercising soft-fail branch (a).
+    /// `ShellInjection::prepare` for an unrecognised shell must return empty
+    /// args and env lists (no-op injection).
     #[cfg(unix)]
     #[test]
     #[serial]
-    fn with_echo_disabled_runs_body_for_non_tty_fd() {
-        use std::cell::Cell;
-        use std::os::unix::io::AsRawFd;
+    fn shell_injection_prepare_other_is_noop() {
+        let inj = ShellInjection::prepare("/usr/bin/fish").expect("prepare must succeed");
+        assert!(
+            inj.extra_args.is_empty(),
+            "Other shell must have no extra args; got: {:?}",
+            inj.extra_args
+        );
+        assert!(
+            inj.extra_env.is_empty(),
+            "Other shell must have no extra env; got: {:?}",
+            inj.extra_env
+        );
+    }
 
-        let file = std::fs::File::open("/dev/null").expect("open /dev/null must succeed");
-        let fd = file.as_raw_fd();
+    /// For zsh, the args list must be empty and the env list must contain exactly
+    /// one entry with key `ZDOTDIR` pointing at the tempdir.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_injection_zsh_args_and_env() {
+        let inj = ShellInjection::prepare("/bin/zsh").expect("prepare must succeed");
+        assert!(
+            inj.extra_args.is_empty(),
+            "zsh injection must have no extra args; got: {:?}",
+            inj.extra_args
+        );
+        assert_eq!(
+            inj.extra_env.len(),
+            1,
+            "zsh injection must have exactly one env entry; got: {:?}",
+            inj.extra_env
+        );
+        assert_eq!(
+            inj.extra_env[0].0,
+            OsString::from("ZDOTDIR"),
+            "env key must be ZDOTDIR"
+        );
+        assert_eq!(
+            inj.extra_env[0].1,
+            OsString::from(inj._tempdir.path()),
+            "env value must be the tempdir path"
+        );
+    }
 
-        let body_ran = Cell::new(false);
-        // /dev/null is not a TTY; tcgetattr returns ENOTTY, exercising branch (a).
-        with_echo_disabled(fd, || {
-            body_ran.set(true);
-        });
-        assert!(body_ran.get(), "body must run even for a non-TTY fd (ENOTTY soft-fail)");
+    /// For bash, the env list must be empty and the args list must be exactly
+    /// `["--rcfile", "<tempdir>/bash-init"]`.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_injection_bash_args_and_env() {
+        let inj = ShellInjection::prepare("/bin/bash").expect("prepare must succeed");
+        assert!(
+            inj.extra_env.is_empty(),
+            "bash injection must have no extra env; got: {:?}",
+            inj.extra_env
+        );
+        assert_eq!(
+            inj.extra_args.len(),
+            2,
+            "bash injection must have exactly two args; got: {:?}",
+            inj.extra_args
+        );
+        assert_eq!(inj.extra_args[0], OsString::from("--rcfile"));
+        let expected_path = inj._tempdir.path().join("bash-init");
+        assert_eq!(
+            inj.extra_args[1],
+            OsString::from(expected_path),
+            "second arg must be the bash-init path"
+        );
+    }
+
+    /// When `ZDOTDIR` is set in the host env, the generated `.zshrc` must
+    /// contain the original value (base64-encoded for round-trip safety).
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_injection_zsh_script_restores_original_zdotdir() {
+        let original = "/custom/zsh/dotfiles";
+        let _guard = EnvGuard::set("ZDOTDIR", original);
+
+        let inj = ShellInjection::prepare("/bin/zsh").expect("prepare must succeed");
+        let rc_path = inj._tempdir.path().join(".zshrc");
+        let contents = std::fs::read_to_string(rc_path).expect("must be readable");
+
+        // The script must contain the base64 encoding of the original value.
+        let encoded = B64.encode(original.as_bytes());
+        assert!(
+            contents.contains(&encoded),
+            ".zshrc must contain base64-encoded original ZDOTDIR '{encoded}'; got:\n{contents}"
+        );
+        // Must also contain the base64 -d decode pattern.
+        assert!(
+            contents.contains("base64 -d"),
+            ".zshrc must use base64 -d to decode ZDOTDIR; got:\n{contents}"
+        );
+    }
+
+    /// When `ZDOTDIR` is unset in the host env, the generated `.zshrc` must
+    /// contain an `unset ZDOTDIR` clause.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_injection_zsh_script_unsets_zdotdir_when_original_absent() {
+        let _guard = EnvGuard::remove("ZDOTDIR");
+
+        let inj = ShellInjection::prepare("/bin/zsh").expect("prepare must succeed");
+        let rc_path = inj._tempdir.path().join(".zshrc");
+        let contents = std::fs::read_to_string(rc_path).expect("must be readable");
+
+        assert!(
+            contents.contains("unset ZDOTDIR"),
+            ".zshrc must contain 'unset ZDOTDIR' when original was absent; got:\n{contents}"
+        );
     }
 }
