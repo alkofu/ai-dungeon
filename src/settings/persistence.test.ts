@@ -72,7 +72,7 @@ describe("saveSettings", () => {
     });
   });
 
-  it('calls mkdir with "." as the first arg before writeTextFile', async () => {
+  it('calls mkdir with "" (empty string) as the first arg before writeTextFile', async () => {
     const { saveSettings } = await import("./persistence");
     const { mkdir, writeTextFile } = await import("@tauri-apps/plugin-fs");
     const mkdirMock = vi.mocked(mkdir);
@@ -82,7 +82,7 @@ describe("saveSettings", () => {
 
     expect(mkdirMock).toHaveBeenCalled();
     const mkdirFirstArg = mkdirMock.mock.calls[0][0];
-    expect(mkdirFirstArg).toBe(".");
+    expect(mkdirFirstArg).toBe("");
 
     // mkdir must be called before writeTextFile
     const mkdirOrder = mkdirMock.mock.invocationCallOrder[0];
@@ -90,7 +90,7 @@ describe("saveSettings", () => {
     expect(mkdirOrder).toBeLessThan(writeOrder);
   });
 
-  it('does NOT call mkdir with "" (empty string) — regression guard', async () => {
+  it('does NOT call mkdir with "." (trailing-dot regression guard)', async () => {
     const { saveSettings } = await import("./persistence");
     const { mkdir } = await import("@tauri-apps/plugin-fs");
     const mkdirMock = vi.mocked(mkdir);
@@ -99,7 +99,7 @@ describe("saveSettings", () => {
 
     const calls = mkdirMock.mock.calls;
     for (const call of calls) {
-      expect(call[0]).not.toBe("");
+      expect(call[0]).not.toBe(".");
     }
   });
 });

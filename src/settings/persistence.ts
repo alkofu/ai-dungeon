@@ -54,12 +54,13 @@ export async function loadSettings(): Promise<Settings> {
  * Persist settings to disk. Creates the app-config directory if needed
  * (idempotent via recursive: true), then writes the full settings object as
  * two-space-indented JSON so the file is human-editable.
- *
- * Note: use "." (not "") as the mkdir path — empty string is undocumented
- * and may not work correctly across Tauri fs plugin versions.
  */
 export async function saveSettings(settings: Settings): Promise<void> {
-  await mkdir(".", { baseDir: BaseDirectory.AppConfig, recursive: true });
+  // Use "" (empty string) rather than "." as the path. "." resolves to
+  // "…com.alkofu.ai-dungeon/." — a trailing-dot component that doesn't match the
+  // `$APPCONFIG` whitelist in `fs:allow-mkdir`, so Tauri's scope checker rejects it.
+  // "" resolves to the base directory itself, satisfying the scope check.
+  await mkdir("", { baseDir: BaseDirectory.AppConfig, recursive: true });
   await writeTextFile("settings.json", JSON.stringify(settings, null, 2), {
     baseDir: BaseDirectory.AppConfig,
   });
