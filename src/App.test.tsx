@@ -73,6 +73,7 @@ vi.mock("./settings/SettingsContext", () => ({
       terminal: { fontSize: 13 },
     },
     updateSettings: vi.fn().mockResolvedValue(undefined),
+    saveError: null,
   }),
 }));
 

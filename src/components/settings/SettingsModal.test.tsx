@@ -6,20 +6,23 @@
 
 import { vi } from "vitest";
 
-const { updateSettingsSpy, mockSettingsStore } = vi.hoisted(() => {
+const { updateSettingsSpy, mockSettingsStore, mockSaveError } = vi.hoisted(() => {
   const _store = {
     version: 1 as const,
     colorScheme: "auto" as "light" | "dark" | "auto",
     terminal: { fontSize: 13 },
   };
   const _spy = vi.fn().mockResolvedValue(undefined);
-  return { updateSettingsSpy: _spy, mockSettingsStore: _store };
+  // saveError is re-read on each useSettings() invocation; tests should set it before the render under test.
+  const _err = { current: null as Error | null };
+  return { updateSettingsSpy: _spy, mockSettingsStore: _store, mockSaveError: _err };
 });
 
 vi.mock("../../settings/SettingsContext", () => ({
   useSettings: () => ({
     settings: mockSettingsStore,
     updateSettings: updateSettingsSpy,
+    saveError: mockSaveError.current,
   }),
 }));
 
@@ -49,6 +52,7 @@ describe("SettingsModal", () => {
     vi.clearAllMocks();
     mockSettingsStore.colorScheme = "auto";
     mockSettingsStore.terminal.fontSize = 13;
+    mockSaveError.current = null;
   });
 
   it("renders the Color scheme Select with three options (Light, Dark, Auto)", async () => {
@@ -154,5 +158,23 @@ describe("SettingsModal", () => {
     expect(isFinite(NaN)).toBe(false);
     // On fresh render with no interaction, updateSettings is not called
     expect(updateSettingsSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders an inline Alert with the error message when saveError is non-null", () => {
+    mockSaveError.current = new Error("disk full");
+
+    renderWithProviders(<SettingsModal opened={true} onClose={vi.fn()} />);
+
+    expect(within(document.body).getByTestId("settings-save-error")).toBeInTheDocument();
+    expect(within(document.body).getByTestId("settings-save-error").textContent).toContain(
+      "disk full",
+    );
+  });
+
+  it("does NOT render the inline Alert when saveError is null", () => {
+    // mockSaveError.current is null from beforeEach reset
+    renderWithProviders(<SettingsModal opened={true} onClose={vi.fn()} />);
+
+    expect(within(document.body).queryByTestId("settings-save-error")).toBeNull();
   });
 });

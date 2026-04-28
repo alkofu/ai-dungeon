@@ -13,6 +13,7 @@ vi.mock("../../settings/SettingsContext", () => ({
       terminal: mockTerminalSettings,
     },
     updateSettings: vi.fn().mockResolvedValue(undefined),
+    saveError: null,
   }),
 }));
 
