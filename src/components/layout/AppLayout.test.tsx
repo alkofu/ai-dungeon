@@ -74,7 +74,7 @@ vi.mock("./useModifierHeld", async (importOriginal) => {
   return { ...original, isMacPlatform: () => true };
 });
 
-import React from "react";
+import React, { useState } from "react";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test-utils/render";
@@ -83,6 +83,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { _clearSpawnChainForTesting } from "../Terminal/Terminal";
+import type { ShellContext } from "../../types/session";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 
@@ -568,6 +569,95 @@ describe("AppLayout — settings gear button and modal", () => {
 
     await vi.waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    });
+  });
+});
+
+// ── OSC 7 → OSC 7337 E2E integration (Step 4) ────────────────────────────────
+//
+// Renders the App→AppLayout→NavBar→SessionCard chain. Fires OSC 7 then
+// OSC 7337 for a card via the mocked xterm OSC handler API and asserts that
+// the branch name ("main") is rendered in the SessionCard.
+//
+// Step 0 diagnostic finding: the microtask race (suspect c) was NOT reproduced.
+// FIFO microtask ordering holds — OSC 7 always sets lastShellContextRef before
+// OSC 7337 reads it. Step 4 (pendingOsc7337Ref replay) is therefore deferred.
+// Issue: "Investigate: branch not shown on session card in normal repo
+// (cause unidentified)" — see GitHub issue created alongside this PR.
+
+describe("AppLayout — OSC 7 → OSC 7337 E2E integration", () => {
+  // Wrapper that wires onShellContextChange back into AppLayout as controlled
+  // state so the SessionCard receives updated shellContext on handler fires.
+  function AppLayoutWithShellContext({ cardId }: { cardId: string }) {
+    const [shellContext, setShellContext] = useState<Record<string, ShellContext>>({});
+    return (
+      <AppLayout
+        cards={[{ id: cardId }]}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        activeId={cardId}
+        onActiveIdChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
+        shellContext={shellContext}
+        onShellContextChange={(_id, ctx) => {
+          setShellContext((prev) => ({ ...prev, [_id]: ctx }));
+        }}
+      />
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+  });
+
+  it("OSC 7 then OSC 7337 triggers SessionCard to display the branch name", async () => {
+    const cardId = "e2e-card-001";
+
+    await act(async () => {
+      renderWithProviders(<AppLayoutWithShellContext cardId={cardId} />);
+    });
+
+    // Wait for the OSC handlers to be registered (inside the font-load IIFE).
+    const MockXTerm = XTerm as unknown as AnyMock;
+    let registerOscHandlerSpy!: AnyMock;
+    await vi.waitFor(() => {
+      const lastInstance = MockXTerm.mock.results[MockXTerm.mock.results.length - 1]?.value;
+      expect(lastInstance?.parser?.registerOscHandler).toBeDefined();
+      registerOscHandlerSpy = lastInstance.parser.registerOscHandler as AnyMock;
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
+      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
+    });
+
+    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7)![1] as (
+      data: string,
+    ) => boolean;
+    const osc7337Handler = registerOscHandlerSpy.mock.calls.find(
+      (c: unknown[]) => c[0] === 7337,
+    )![1] as (data: string) => boolean;
+
+    // Fire OSC 7 first (establishes workingDirectory in lastShellContextRef).
+    await act(async () => {
+      osc7Handler("file:///home/user/my-project");
+      // Drain the microtask queue so the OSC 7 queueMicrotask callback fires.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+    });
+
+    // Fire OSC 7337 (bare-name: repo<TAB>branch).
+    await act(async () => {
+      osc7337Handler("my-project\tmain");
+      // Drain the microtask queue so the OSC 7337 queueMicrotask callback fires.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+    });
+
+    // SessionCard must now display the branch name.
+    await vi.waitFor(() => {
+      expect(screen.getByText("main")).toBeInTheDocument();
     });
   });
 });
