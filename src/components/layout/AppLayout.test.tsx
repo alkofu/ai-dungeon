@@ -122,6 +122,14 @@ function installSessionAwareMock(mockInvoke: AnyMock) {
       }
       return undefined;
     }
+    // Dungeon lifecycle commands — handled here for documentary clarity even
+    // though the catch-all below would also return undefined.
+    if (cmd === "dungeon_open") {
+      return undefined;
+    }
+    if (cmd === "dungeon_close") {
+      return undefined;
+    }
     return undefined;
   });
 }
@@ -219,6 +227,13 @@ describe("AppLayout", () => {
       expect(String(arg)).not.toContain("[failed to start shell");
       expect(String(arg)).not.toContain("[pty write failed");
     }
+
+    // F-6: assert dungeon_open was called at least once per rendered card,
+    // proving the hook is actually wired from CardPanel.
+    const dungeonOpenCalls = (mockInvoke.mock.calls as [string, unknown][]).filter(
+      (c) => c[0] === "dungeon_open",
+    );
+    expect(dungeonOpenCalls.length).toBeGreaterThanOrEqual(3);
   });
 
   it("rapid card-add does not produce duplicate-spawn errors at the backend boundary", async () => {
