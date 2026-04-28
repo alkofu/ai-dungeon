@@ -507,6 +507,7 @@ pub async fn pty_spawn(
         // App-mandated env entries — must come first.
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "ai-dungeon");
         #[cfg(unix)]
         cmd.env("LC_ALL", resolve_pty_utf8_locale());
 
