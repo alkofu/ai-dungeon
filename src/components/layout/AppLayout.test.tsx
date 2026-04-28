@@ -13,10 +13,25 @@ vi.mock("@xterm/xterm", () => {
       onData: _vi.fn().mockReturnValue({ dispose: _vi.fn() }),
       parser: { registerOscHandler: _vi.fn().mockReturnValue({ dispose: _vi.fn() }) },
       attachCustomKeyEventHandler: _vi.fn(),
+      options: { fontSize: 13 },
     };
   }
   return { Terminal: vi.fn().mockImplementation(MockTerminal) };
 });
+
+// Mock SettingsContext so AppLayout (which renders SettingsModal) can call
+// useSettings() without a real provider or Tauri fs plugin. The default
+// settings match DEFAULT_SETTINGS so all existing tests are unaffected.
+vi.mock("../../settings/SettingsContext", () => ({
+  useSettings: () => ({
+    settings: {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+    },
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
 
 vi.mock("@xterm/addon-fit", () => {
   const _vi = vi;
@@ -59,7 +74,7 @@ vi.mock("./useModifierHeld", async (importOriginal) => {
 });
 
 import React from "react";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test-utils/render";
 import { AppLayout } from "./AppLayout";
@@ -483,5 +498,75 @@ describe("AppLayout — shortcut tooltip overlay", () => {
 
     // Tooltips should disappear
     await vi.waitFor(() => expect(screen.queryByText("⌘1")).toBeNull());
+  });
+});
+
+// ── Settings gear button + modal integration tests ─────────────────────────────
+
+describe("AppLayout — settings gear button and modal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+  });
+
+  function renderLayout() {
+    return renderWithProviders(
+      <AppLayout
+        cards={[]}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        activeId={null}
+        onActiveIdChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
+      />,
+    );
+  }
+
+  it("gear button is present in the header", () => {
+    renderLayout();
+    expect(screen.getByRole("button", { name: /open settings/i })).toBeInTheDocument();
+  });
+
+  it("clicking the gear button opens the Settings modal", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+
+    // Modal should not be open initially
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /open settings/i }));
+    });
+
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+  });
+
+  it("Settings modal closes on close-button click", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+
+    // Open modal
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /open settings/i }));
+    });
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+
+    // Click the modal's close button. Mantine renders it inside the dialog section.
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    const closeButton = within(dialog).getByRole("button");
+    await act(async () => {
+      await user.click(closeButton);
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    });
   });
 });

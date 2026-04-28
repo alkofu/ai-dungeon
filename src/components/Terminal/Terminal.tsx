@@ -42,6 +42,7 @@ import {
   parseOsc7337Payload,
 } from "../../types/sessionPayload";
 import type { SessionContext, ShellContext } from "../../types/session";
+import { useSettings } from "../../settings/SettingsContext";
 
 interface TerminalProps {
   // The caller supplies a stable UUID that identifies this PTY session. The
@@ -99,6 +100,19 @@ export function Terminal({
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const { settings } = useSettings();
+  const fontSize = settings.terminal.fontSize;
+
+  // Promoted refs for XTerm instance, FitAddon, and isReady flag.
+  // These are assigned inside the spawn useEffect after construction and cleared
+  // in cleanup. The fontSize useEffect reads them to apply live font-size changes
+  // without re-spawning the PTY. Moving them here (vs. inside the spawn effect)
+  // is the key invariant: do NOT add fontSize to the spawn effect's dependency
+  // array, as that would re-spawn the PTY on every font-size change.
+  const termRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const isReadyRef = useRef(false);
+
   // Keep refs to the latest callbacks so the OSC handlers always call the current
   // version without adding them to the useEffect dependency array (which would
   // cause the effect — and therefore the PTY session — to restart every time the
@@ -114,10 +128,6 @@ export function Terminal({
 
   useEffect(() => {
     if (!containerRef.current) return;
-
-    // Track whether the async spawn has completed so the ResizeObserver
-    // callback and onData handler know whether the PTY is ready.
-    const isReadyRef = { current: false };
 
     // Track whether cleanup has run so the async IIFEs can bail early.
     let cancelled = false;
@@ -143,17 +153,18 @@ export function Terminal({
     //
     // fontFamily: '"MesloLGS NF", monospace' — Powerlevel10k-recommended Nerd
     // Font. Falls back to system monospace if vendored TTFs are unavailable.
-    // fontSize: 13, lineHeight: 1, letterSpacing: 0 — pinned to the values
-    // documented by xterm.js for correct Nerd Font / powerline glyph alignment.
-    // DO NOT change lineHeight or letterSpacing without re-testing all powerline
-    // glyphs. customGlyphs is intentionally NOT set (default false) — it only
-    // affects block/box-drawing characters and has no effect under the DOM
-    // renderer; it does not fix powerline glyphs.
+    // fontSize: sourced from settings.terminal.fontSize (default 13). lineHeight: 1,
+    // letterSpacing: 0 — pinned to the values documented by xterm.js for correct
+    // Nerd Font / powerline glyph alignment. DO NOT change lineHeight or
+    // letterSpacing without re-testing all powerline glyphs. customGlyphs is
+    // intentionally NOT set (default false) — it only affects block/box-drawing
+    // characters and has no effect under the DOM renderer; it does not fix
+    // powerline glyphs.
     // minimumContrastRatio: 1 — disables xterm's automatic colour adjustment,
     // which can shift theme colours in ways that conflict with p10k palettes.
     const term = new XTerm({
       fontFamily: '"MesloLGS NF", monospace',
-      fontSize: 13,
+      fontSize,
       lineHeight: 1,
       letterSpacing: 0,
       minimumContrastRatio: 1,
@@ -162,6 +173,10 @@ export function Terminal({
     const webFontsAddon = new WebFontsAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(webFontsAddon);
+
+    // Assign promoted refs so the fontSize effect can update the live terminal.
+    termRef.current = term;
+    fitAddonRef.current = fitAddon;
 
     // Allow the global tab-switching hotkeys to escape xterm.
     // Returning false tells xterm "do not handle this event"; the event
@@ -490,6 +505,11 @@ export function Terminal({
       // skip the term.writeln call on the already-disposed terminal.
       // This ordering is load-bearing for the cancelled guard in the flush loop.
       cancelled = true;
+      // Clear promoted refs so the fontSize effect's early-return guard works
+      // correctly on the subsequent remount cycle (StrictMode-safe).
+      termRef.current = null;
+      fitAddonRef.current = null;
+      isReadyRef.current = false;
       // Clear the pending queue so a remount does not replay stale input from
       // this unmounted instance.
       pendingWrites.length = 0;
@@ -514,7 +534,35 @@ export function Terminal({
       spawnChain.set(sessionId, killPromise);
       term.dispose();
     };
+    // fontSize is intentionally excluded from the spawn effect's dependency array.
+    // Adding it would re-spawn the PTY on every font-size change, destroying shell
+    // state. The fontSize effect below handles live updates without re-spawning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // ── Font-size live-update effect ──────────────────────────────────────────
+  //
+  // This effect runs whenever `fontSize` changes and updates the live terminal
+  // without re-spawning the PTY. It is keyed on [fontSize] only — do NOT add
+  // `fontSize` to the spawn effect's [sessionId] dependency array, as that
+  // would re-spawn the PTY on every font-size change, destroying shell state.
+  //
+  // StrictMode null-guard: the early-return on !termRef.current is required
+  // because React 19 StrictMode double-invokes effects. On the first (discarded)
+  // mount, the spawn effect's cleanup runs and sets termRef.current = null before
+  // this effect fires for the second (real) mount. Without the guard, this effect
+  // would throw on the first StrictMode cycle.
+  useEffect(() => {
+    if (!termRef.current) return;
+    termRef.current.options.fontSize = fontSize;
+    fitAddonRef.current?.fit();
+    if (isReadyRef.current) {
+      const dims = fitAddonRef.current?.proposeDimensions();
+      if (dims) {
+        void invoke("pty_resize", { sessionId, cols: dims.cols, rows: dims.rows });
+      }
+    }
+  }, [fontSize, sessionId]);
 
   // React 19 StrictMode mounts → unmounts → remounts this effect in dev.
   // The cleanup (dispose + disconnect) handles this correctly.

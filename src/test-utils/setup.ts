@@ -1,5 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 
+// jsdom does not implement Element.prototype.scrollIntoView. Mantine's Combobox
+// component calls scrollIntoView on list items (e.g. when navigating a Select
+// dropdown). Without this stub, an unhandled exception fires after tests that
+// interact with Mantine Select components.
+Element.prototype.scrollIntoView = vi.fn();
+
 // jsdom does not implement window.matchMedia. Mantine's MantineProvider uses
 // it to detect the user's preferred color scheme. This stub satisfies the API
 // so that tests can render Mantine components without throwing.
