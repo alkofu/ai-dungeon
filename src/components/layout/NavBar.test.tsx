@@ -4,6 +4,14 @@ import { vi } from "vitest";
 import { Tabs } from "@mantine/core";
 import { renderWithProviders } from "../../test-utils/render";
 import { NavBar } from "./NavBar";
+
+// SHORTCUT_GLYPH in SessionCard.tsx is a module-level constant evaluated at
+// import time. Mock isMacPlatform to return true so the constant is "⌘" in
+// every test in this file (no test here expects "Ctrl+").
+vi.mock("./useModifierHeld", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./useModifierHeld")>();
+  return { ...original, isMacPlatform: () => true };
+});
 import type { ReactElement } from "react";
 
 // NavBar now renders Tabs.List and Tabs.Tab which require a Tabs ancestor for
@@ -14,6 +22,10 @@ function renderNavBar(ui: ReactElement) {
       {ui}
     </Tabs>,
   );
+}
+
+function makeCards(count: number) {
+  return Array.from({ length: count }, (_, i) => ({ id: `card-${String(i + 1)}` }));
 }
 
 describe("NavBar", () => {
@@ -171,6 +183,70 @@ describe("NavBar", () => {
     expect(innerSpan).toHaveStyle({ width: "100%" });
     expect(innerSpan).toHaveStyle({ textAlign: "left" });
     expect(innerSpan).toHaveStyle({ whiteSpace: "normal" });
+  });
+
+  // ── Shortcut tooltip overlay tests ───────────────────────────────────────────
+
+  describe("shortcut tooltip overlay via modifierPressed prop", () => {
+    it("3 cards + modifierPressed=true: DOM contains ⌘1, ⌘2, ⌘3", () => {
+      renderNavBar(
+        <NavBar
+          cards={makeCards(3)}
+          onAddCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          sessionContext={{}}
+          shellContext={{}}
+          modifierPressed={true}
+        />,
+      );
+
+      // Tooltips use withinPortal={true}, so labels appear in document.body portal.
+      // Use document-scoped screen.getByText (not within(navbar)) to find them.
+      expect(screen.getByText("⌘1")).toBeInTheDocument();
+      expect(screen.getByText("⌘2")).toBeInTheDocument();
+      expect(screen.getByText("⌘3")).toBeInTheDocument();
+    });
+
+    it("3 cards + modifierPressed=false: no ⌘N text in DOM", () => {
+      renderNavBar(
+        <NavBar
+          cards={makeCards(3)}
+          onAddCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          sessionContext={{}}
+          shellContext={{}}
+          modifierPressed={false}
+        />,
+      );
+
+      expect(screen.queryByText("⌘1")).toBeNull();
+      expect(screen.queryByText("⌘2")).toBeNull();
+      expect(screen.queryByText("⌘3")).toBeNull();
+    });
+
+    it("11 cards + modifierPressed=true: ⌘1–⌘9 present, ⌘10 absent; card 10 remove button still in DOM", () => {
+      renderNavBar(
+        <NavBar
+          cards={makeCards(11)}
+          onAddCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          sessionContext={{}}
+          shellContext={{}}
+          modifierPressed={true}
+        />,
+      );
+
+      // Cards 1–9 get tooltips
+      for (let i = 1; i <= 9; i++) {
+        expect(screen.getByText(`⌘${String(i)}`)).toBeInTheDocument();
+      }
+
+      // Card 10 does NOT get a tooltip (position > 9 guard)
+      expect(screen.queryByText("⌘10")).toBeNull();
+
+      // Card 10 itself is still rendered — only the overlay is suppressed
+      expect(screen.getByRole("button", { name: /Remove card card-10/i })).toBeInTheDocument();
+    });
   });
 
   it("does NOT trigger the tab onChange when the close button is clicked (stopPropagation)", async () => {

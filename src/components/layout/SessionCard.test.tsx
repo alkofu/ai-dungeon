@@ -7,6 +7,14 @@ import { SessionCard } from "./SessionCard";
 import { getMockSessionContext, SESSION_CONTEXT_FIXTURES } from "./sessionContext.mock";
 import type { ShellContext } from "../../types/session";
 
+// SHORTCUT_GLYPH in SessionCard.tsx is a module-level constant evaluated at
+// import time. Mock isMacPlatform to return true so the constant is "⌘" in
+// every test in this file (no test here expects "Ctrl+").
+vi.mock("./useModifierHeld", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./useModifierHeld")>();
+  return { ...original, isMacPlatform: () => true };
+});
+
 // Cards 1–5 are wrapped in Tabs context matching production rendering.
 function renderInTabs(cardId: string, onRemove = vi.fn()) {
   return renderWithProviders(
@@ -179,6 +187,62 @@ describe("SessionCard", () => {
     const thirdBadge = badges[2];
     expect(thirdBadge.querySelectorAll('[role="img"]')).toHaveLength(0);
     expect(thirdBadge.textContent).toContain("—");
+  });
+
+  // ── Shortcut tooltip overlay tests ───────────────────────────────────────────
+
+  describe("shortcut tooltip overlay", () => {
+    it("modifierPressed=true + position=2: tooltip label ⌘2 is in the DOM", async () => {
+      renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value="card-2">
+            <SessionCard cardId="card-2" onRemove={vi.fn()} modifierPressed={true} position={2} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+
+      // Tooltip uses withinPortal={true}, so the label is in document.body portal
+      expect(screen.getByText("⌘2")).toBeInTheDocument();
+    });
+
+    it("modifierPressed=false + position=2: tooltip label ⌘2 is absent", () => {
+      renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value="card-2">
+            <SessionCard cardId="card-2" onRemove={vi.fn()} modifierPressed={false} position={2} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+
+      expect(screen.queryByText("⌘2")).toBeNull();
+    });
+
+    it("modifierPressed=true + position=10: tooltip label ⌘10 is absent (position > 9 guard)", () => {
+      renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value="card-10">
+            <SessionCard cardId="card-10" onRemove={vi.fn()} modifierPressed={true} position={10} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+
+      expect(screen.queryByText("⌘10")).toBeNull();
+    });
+
+    it("existing tests are unaffected: new props are optional with safe defaults", () => {
+      renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value={CARD_ID_F0}>
+            <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+
+      // No tooltip label visible
+      expect(screen.queryByText("⌘1")).toBeNull();
+      // Card content still renders
+      expect(screen.getByText(SESSION_CONTEXT_FIXTURES[0].slug)).toBeInTheDocument();
+    });
   });
 
   it("mock module is deterministic: same cardId returns deeply equal objects", () => {

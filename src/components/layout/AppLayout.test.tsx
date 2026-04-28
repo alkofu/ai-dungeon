@@ -50,8 +50,16 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockImplementation(() => Promise.resolve(vi.fn())),
 }));
 
+// SHORTCUT_GLYPH in SessionCard.tsx is a module-level constant evaluated at
+// import time. Mock isMacPlatform to return true so the constant is "⌘" in
+// every test in this file (no test here expects "Ctrl+").
+vi.mock("./useModifierHeld", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./useModifierHeld")>();
+  return { ...original, isMacPlatform: () => true };
+});
+
 import React from "react";
-import { act } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test-utils/render";
 import { AppLayout } from "./AppLayout";
@@ -406,5 +414,74 @@ describe("AppLayout — keyboard navigation", () => {
     } finally {
       document.body.removeChild(textarea);
     }
+  });
+});
+
+// ── Shortcut tooltip overlay integration tests ─────────────────────────────────
+
+describe("AppLayout — shortcut tooltip overlay", () => {
+  // Use real timers — the existing test infrastructure (vi.mock chain, installSessionAwareMock,
+  // _clearSpawnChainForTesting, vi.waitFor) does not mix safely with vi.useFakeTimers().
+  // The 250 ms hold delay is exercised via real wall-clock time in vi.waitFor polling.
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+
+    // Stub macOS so isMacPlatform() returns true → ⌘ glyph
+    Object.defineProperty(navigator, "userAgentData", {
+      value: { platform: "macOS" },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(navigator, "userAgentData", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  it("holding Meta for 250ms shows ⌘1/⌘2/⌘3 on 3 cards; releasing hides them", async () => {
+    const user = userEvent.setup({ delay: null });
+
+    renderWithProviders(
+      <AppLayout
+        cards={[{ id: "A" }, { id: "B" }, { id: "C" }]}
+        onAddCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        activeId="A"
+        onActiveIdChange={vi.fn()}
+        sessionContext={{}}
+        onSessionContextChange={vi.fn()}
+        shellContext={{}}
+        onShellContextChange={vi.fn()}
+      />,
+    );
+
+    // No tooltip initially
+    expect(screen.queryByText("⌘1")).toBeNull();
+
+    // Hold Meta key open (no release)
+    await user.keyboard("{Meta>}");
+
+    // Wait for the 250 ms hold-delay timer to fire; poll with a generous timeout
+    await vi.waitFor(() => expect(screen.getByText("⌘1")).toBeInTheDocument(), {
+      timeout: 500,
+    });
+    expect(screen.getByText("⌘2")).toBeInTheDocument();
+    expect(screen.getByText("⌘3")).toBeInTheDocument();
+
+    // Release Meta
+    await user.keyboard("{/Meta}");
+
+    // Tooltips should disappear
+    await vi.waitFor(() => expect(screen.queryByText("⌘1")).toBeNull());
   });
 });
