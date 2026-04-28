@@ -106,6 +106,10 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 20. **Direct jump** — Add at least three cards. Press `Cmd+2` / `Ctrl+2`. Confirm the second card becomes active. Press `Cmd+3` / `Ctrl+3`. Confirm the third card becomes active.
 21. **Direct jump out of range** — With two cards active, press `Cmd+9` / `Ctrl+9`. Confirm the active tab does not change and no error occurs.
 22. **No WebView back-navigation** — Press `Cmd+ArrowLeft` / `Ctrl+ArrowLeft` with only one card open (cycling is a no-op). Confirm the WebView does not navigate back (no blank or prior-page flash).
+23. **Shortcut tooltip — appears on hold** — Add three cards. Hold `Cmd` (macOS) or `Ctrl` (Windows/Linux) for roughly half a second without releasing. Confirm that `⌘1`, `⌘2`, `⌘3` (or `Ctrl+1`, `Ctrl+2`, `Ctrl+3`) labels appear on the respective sidebar cards, rendered outside the sidebar clipping boundary (visually to the right of each card). Release the modifier; confirm all labels disappear immediately.
+24. **Shortcut tooltip — no flash on fast press** — Tap `Cmd+1` / `Ctrl+1` quickly (a normal shortcut activation). Confirm the first card becomes active and no tooltip label briefly appears on any card.
+25. **Shortcut tooltip — clears on app switch** — With three cards, hold `Cmd` / `Ctrl` until labels appear. `Cmd+Tab` / `Alt+Tab` to another application and back. Confirm no labels are stuck after returning. Holding the modifier again must cause them to re-appear after 250 ms as normal.
+26. **Shortcut tooltip — position 10+ excluded** — Add 10 or more cards, then hold `Cmd` / `Ctrl` until labels appear. Confirm exactly cards 1–9 show labels and card 10 (and any beyond it) shows none. Confirm card 10's content (slug, repo/branch row) is still rendered normally.
 
 ## CI
 

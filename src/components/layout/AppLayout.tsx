@@ -1,6 +1,7 @@
 import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
+import { useModifierHeld } from "./useModifierHeld";
 import type { Card } from "../../types/card";
 import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
@@ -33,6 +34,7 @@ export function AppLayout({
   onShellContextChange,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
+  const modifierPressed = useModifierHeld();
 
   const activate = (targetId: string | null) => {
     if (targetId !== null) {
@@ -141,6 +143,7 @@ export function AppLayout({
             onRemoveCard={onRemoveCard}
             sessionContext={sessionContext}
             shellContext={shellContext}
+            modifierPressed={modifierPressed}
           />
         </AppShell.Navbar>
 
