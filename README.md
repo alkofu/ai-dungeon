@@ -14,6 +14,7 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 - **Native desktop app** — built on Tauri v2 for a fast, lightweight shell around a modern web UI.
 - **Live session metadata** — each terminal card holds two independent context slots: `sessionContext` (populated by OSC 6800 — AI CLI session metadata: slug, repo, branch, PR/issue numbers) and `shellContext` (populated by OSC 7 + OSC 7337 — shell CWD and git context). The sidebar card renders whichever slot is available, preferring `sessionContext` over `shellContext`, with mock placeholder data as the fallback. All incoming data is validated before it enters app state. See [docs/project-structure.md](docs/project-structure.md#osc-session-context-flow-6800--7--7337).
 - **Powerlevel10K / Nerd Font rendering** — the embedded terminal vendors the MesloLGS NF Nerd Font and preloads it before xterm.js opens, so Powerlevel10K powerline glyphs and icons render with correct spacing out of the box. The PTY also exports a UTF-8 locale on Unix so non-ASCII prompt characters are not corrupted. `TERM_PROGRAM=ai-dungeon` is exported on every platform so child processes (e.g., AI CLIs) can detect they are running inside ai-dungeon. See [docs/project-structure.md](docs/project-structure.md#meslolgs-nf--xterm-font-loading) for the design rationale.
+- **User settings** — a gear button (⚙) in the AppShell header opens a Settings modal with two controls: Color scheme (Light / Dark / Auto) and Terminal font size (6–48 pt, default 13). Changes apply instantly without a save button or app reload. Settings persist to `appConfigDir()/settings.json` (macOS: `~/Library/Application Support/com.alkofu.ai-dungeon/settings.json`) as human-readable JSON. A missing or corrupt file silently falls back to defaults; no crash or error UI is shown.
 - **Secure by default** — restrictive Content Security Policy and minimal Tauri capabilities out of the box. See [docs/security.md](docs/security.md).
 - **Live session context in the navbar** — each `SessionCard` in the sidebar shows the shell's current working directory and git context (repo name + active branch) in its second row, updated after every command via OSC 7 and OSC 7337 escape sequences. When git context is present, row 2 shows `repo : branch • path-tail`; otherwise only the path-tail is shown. Supported shells: bash and zsh. Fish and csh are not supported in this iteration.
 
@@ -21,11 +22,30 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 
 The app uses a three-part Mantine `AppShell`:
 
-- **Header** — app title and navbar toggle.
+- **Header** — app title, navbar toggle, and a gear button (⚙) that opens the Settings modal.
 - **Navbar (left sidebar)** — a "Cards" section with a `+` button to add cards. Each card is a `Tabs.Tab` whose label is rendered by the `SessionCard` component: a 3-row block showing the session slug, `repo:branch • path-tail`, and PR / Issue badges. Clicking the tab activates the corresponding terminal; the `×` button in the top-right of each card removes it and kills its PTY session.
 - **Main pane** — one `Tabs.Panel` per card, each containing an xterm.js terminal connected to a real shell via Tauri IPC. Inactive panels are hidden with CSS (`display: none`) but remain mounted, keeping their PTY sessions alive.
 
 When there are no cards, the main pane shows an empty-state prompt and the sidebar shows "No cards yet".
+
+### Settings
+
+The Settings modal (gear button in the header) exposes two preferences:
+
+| Setting            | Values              | Default | Effect                                                                                                              |
+| ------------------ | ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| Color scheme       | Light / Dark / Auto | Auto    | `Auto` follows the OS `prefers-color-scheme` media query; the other options force a specific theme unconditionally. |
+| Terminal font size | 6–48 pt             | 13      | Applied to the live terminal immediately — no re-spawn, no lost shell state.                                        |
+
+Settings are persisted to `appConfigDir()/settings.json`:
+
+- **macOS:** `~/Library/Application Support/com.alkofu.ai-dungeon/settings.json`
+- **Windows:** `%APPDATA%\com.alkofu.ai-dungeon\settings.json`
+- **Linux:** `~/.config/com.alkofu.ai-dungeon/settings.json`
+
+The file is two-space-indented JSON and includes a `version` field (`1` for v1) for forward-compatible migration. It is safe to edit by hand; a corrupt or missing file causes a silent fallback to defaults on the next launch.
+
+> **Behavioural change (v1 settings release):** The default color scheme is now `"auto"`. Before this change, the app always launched in light mode. Users whose OS is in dark mode will now see the dark theme on first launch. To restore the previous behaviour, open Settings and set Color scheme to Light; that choice persists across restarts.
 
 ### Terminal context (OSC 7 / OSC 7337)
 

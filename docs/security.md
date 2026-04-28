@@ -1,6 +1,6 @@
 # Security Notes
 
-The app ships with a restrictive Content Security Policy that limits sources to `'self'` and the Tauri IPC/asset origins. Tauri capabilities are scoped to `core:default` only — no filesystem, shell, or HTTP client permissions are granted by default. Both are intentional baselines; extend them in `src-tauri/capabilities/` and `tauri.conf.json` as features are added.
+The app ships with a restrictive Content Security Policy that limits sources to `'self'` and the Tauri IPC/asset origins. Tauri capabilities are intentionally narrow: `core:default` covers IPC fundamentals; the `tauri-plugin-fs` capability is additionally scoped to `$APPCONFIG/settings.json` only (read, write, exists, and mkdir on `$APPCONFIG`) — no other filesystem path is accessible through the plugin. Shell and HTTP client permissions are not granted. Both the CSP and capability set are intentional baselines; extend them in `src-tauri/capabilities/` and `tauri.conf.json` as features are added.
 
 ## OSC Session-Context Trust Boundary
 

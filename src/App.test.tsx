@@ -63,6 +63,19 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockImplementation(() => Promise.resolve(vi.fn())),
 }));
 
+// Mock SettingsContext so AppLayout's SettingsModal can call useSettings()
+// without a real provider or Tauri fs plugin.
+vi.mock("./settings/SettingsContext", () => ({
+  useSettings: () => ({
+    settings: {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+    },
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 type AnyMock = ReturnType<typeof vi.fn>;
 
 // Integration note: the OSC 6800 → SessionCard row-2 propagation chain is

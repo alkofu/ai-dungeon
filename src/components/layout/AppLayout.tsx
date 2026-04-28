@@ -1,11 +1,13 @@
-import { AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
+import { ActionIcon, AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
+import { IconSettings } from "@tabler/icons-react";
 import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
 import { useModifierHeld } from "./useModifierHeld";
 import type { Card } from "../../types/card";
 import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
+import { SettingsModal } from "../settings";
 
 // Only consumer is App.tsx. `children` has been removed — AppLayout renders
 // Tabs.Panel content (Terminal instances) directly so that Tabs.List (navbar)
@@ -34,6 +36,7 @@ export function AppLayout({
   onShellContextChange,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
+  const [settingsOpened, { open: openSettings, close: closeSettings }] = useDisclosure(false);
   const modifierPressed = useModifierHeld();
 
   const activate = (targetId: string | null) => {
@@ -130,9 +133,14 @@ export function AppLayout({
         }}
       >
         <AppShell.Header>
-          <Group h="100%" px="md">
-            <Burger opened={opened} onClick={toggle} size="sm" aria-label="Toggle navigation" />
-            <Title order={3}>AI Dungeon</Title>
+          <Group h="100%" px="md" justify="space-between">
+            <Group>
+              <Burger opened={opened} onClick={toggle} size="sm" aria-label="Toggle navigation" />
+              <Title order={3}>AI Dungeon</Title>
+            </Group>
+            <ActionIcon variant="subtle" onClick={openSettings} aria-label="Open settings">
+              <IconSettings size={20} />
+            </ActionIcon>
           </Group>
         </AppShell.Header>
 
@@ -170,6 +178,7 @@ export function AppLayout({
           )}
         </AppShell.Main>
       </AppShell>
+      <SettingsModal opened={settingsOpened} onClose={closeSettings} />
     </Tabs>
   );
 }
