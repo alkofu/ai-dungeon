@@ -1,11 +1,12 @@
-import { ActionIcon, Group, Tabs, Text, Title } from "@mantine/core";
+import { ActionIcon, Group, Menu, Tabs, Text, Title } from "@mantine/core";
 import type { Card } from "../../types/card";
 import type { SessionContext, ShellContext } from "../../types/session";
 import { SessionCard } from "./SessionCard";
 
 interface NavBarProps {
   cards: Card[];
-  onAddCard: () => void;
+  onAddTerminalCard: () => void;
+  onAddDungeonCard: () => void;
   onRemoveCard: (id: string) => void;
   sessionContext: Record<string, SessionContext>;
   shellContext: Record<string, ShellContext>;
@@ -15,7 +16,8 @@ interface NavBarProps {
 
 export function NavBar({
   cards,
-  onAddCard,
+  onAddTerminalCard,
+  onAddDungeonCard,
   onRemoveCard,
   sessionContext,
   shellContext,
@@ -25,9 +27,17 @@ export function NavBar({
     <>
       <Group justify="space-between">
         <Title order={5}>Cards</Title>
-        <ActionIcon aria-label="Add card" variant="default" onClick={onAddCard}>
-          +
-        </ActionIcon>
+        <Menu position="bottom-end" withinPortal>
+          <Menu.Target>
+            <ActionIcon aria-label="Add card menu" variant="default">
+              +
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={onAddTerminalCard}>Terminal</Menu.Item>
+            <Menu.Item onClick={onAddDungeonCard}>Dungeon</Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
       </Group>
 
       {cards.length === 0 ? (

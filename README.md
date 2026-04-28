@@ -8,7 +8,7 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 
 ## Key Features
 
-- **Card-as-tab terminals** — each card in the sidebar is a vertical tab; clicking it switches which terminal is visible in the main pane. PTY sessions are preserved across switches — the shell keeps running and scrollback is intact even when a tab is not visible.
+- **Card-as-tab workspace** — each card in the sidebar is a vertical tab. Cards have a type: `terminal` cards open a PTY session (shell keeps running and scrollback is intact even when a tab is not visible); `dungeon` cards are reserved for future AI Dungeon game state and currently render a placeholder. Clicking a tab switches which card is visible in the main pane.
 - **Keyboard tab navigation** — global shortcuts work whether focus is in the terminal or the sidebar. `Cmd+ArrowLeft` / `Cmd+ArrowRight` (macOS) or `Ctrl+ArrowLeft` / `Ctrl+ArrowRight` (Windows/Linux) cycle tabs with wrap-around. `Cmd/Ctrl+1` through `Cmd/Ctrl+9` jump directly to a tab by position. All eleven shortcuts suppress the WebView's default back/forward navigation unconditionally. Holding the modifier key (`Cmd` on macOS, `Ctrl` on Windows/Linux) for ≥ 250 ms reveals shortcut labels (`⌘1`–`⌘9` or `Ctrl+1`–`Ctrl+9`) on the first nine session cards as a discoverability hint; a quick tap that activates a shortcut produces no label flash.
 - **Multiple AI CLIs in one place** — designed to host tools like Claude Code, OpenCode, and other terminal-based AI assistants.
 - **Native desktop app** — built on Tauri v2 for a fast, lightweight shell around a modern web UI.
@@ -23,8 +23,8 @@ AI coding assistants increasingly run as CLIs that hold long-lived, stateful ses
 The app uses a three-part Mantine `AppShell`:
 
 - **Header** — app title, navbar toggle, and a gear button (⚙) that opens the Settings modal.
-- **Navbar (left sidebar)** — a "Cards" section with a `+` button to add cards. Each card is a `Tabs.Tab` whose label is rendered by the `SessionCard` component: a 3-row block showing the session slug, `repo:branch • path-tail`, and PR / Issue badges. Clicking the tab activates the corresponding terminal; the `×` button in the top-right of each card removes it and kills its PTY session.
-- **Main pane** — one `Tabs.Panel` per card, each containing an xterm.js terminal connected to a real shell via Tauri IPC. Inactive panels are hidden with CSS (`display: none`) but remain mounted, keeping their PTY sessions alive.
+- **Navbar (left sidebar)** — a "Cards" section with a `+` menu button. Clicking the button opens a dropdown with two options: **Terminal** (spawns a PTY session) and **Dungeon** (placeholder for future AI Dungeon content). Each card is a `Tabs.Tab` whose label is rendered by the `SessionCard` component: a 3-row block showing the session slug, `repo:branch • path-tail`, and PR / Issue badges. Clicking the tab activates the corresponding card; the `×` button in the top-right of each card removes it. Removing a terminal card kills its PTY session; removing a dungeon card has no PTY side effect.
+- **Main pane** — one `Tabs.Panel` per card. Terminal cards contain an xterm.js terminal connected to a real shell via Tauri IPC; inactive panels are hidden with CSS (`display: none`) but remain mounted, keeping PTY sessions alive. Dungeon cards display a "Dungeon: under construction" placeholder and do not spawn a PTY.
 
 When there are no cards, the main pane shows an empty-state prompt and the sidebar shows "No cards yet".
 

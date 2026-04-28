@@ -32,8 +32,8 @@ test.describe("MesloLGS NF font loading", () => {
     await page.goto("/");
 
     // Add a card so a <Terminal> component mounts and triggers font loading.
-    const addButton = page.getByRole("button", { name: /add/i });
-    await addButton.click();
+    await page.getByRole("button", { name: "Add card menu" }).click();
+    await page.getByRole("menuitem", { name: "Terminal" }).click();
 
     // Wait for the terminal root to appear, confirming the component mounted.
     await page.waitForSelector('[data-testid="terminal-root"]');

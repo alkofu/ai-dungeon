@@ -1,3 +1,4 @@
+import React from "react";
 import { ActionIcon, AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import { IconSettings } from "@tabler/icons-react";
@@ -6,15 +7,21 @@ import { useModifierHeld } from "./useModifierHeld";
 import type { Card } from "../../types/card";
 import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
-import { CardPanel } from "./CardPanel";
+import { Terminal } from "../Terminal";
 import { SettingsModal } from "../settings";
+
+function assertNever(x: never): React.ReactNode {
+  console.error(`Unexpected card type: ${String(x)}`);
+  return <Text c="red">Unknown card type: {String(x)}</Text>;
+}
 
 // Only consumer is App.tsx. `children` has been removed — AppLayout renders
 // Tabs.Panel content (Terminal instances) directly so that Tabs.List (navbar)
 // and Tabs.Panel (main) share the same Tabs context.
 interface AppLayoutProps {
   cards: Card[];
-  onAddCard: () => void;
+  onAddTerminalCard: () => void;
+  onAddDungeonCard: () => void;
   onRemoveCard: (id: string) => void;
   activeId: string | null;
   onActiveIdChange: (value: string | null) => void;
@@ -26,7 +33,8 @@ interface AppLayoutProps {
 
 export function AppLayout({
   cards,
-  onAddCard,
+  onAddTerminalCard,
+  onAddDungeonCard,
   onRemoveCard,
   activeId,
   onActiveIdChange,
@@ -147,7 +155,8 @@ export function AppLayout({
         <AppShell.Navbar p="md">
           <NavBar
             cards={cards}
-            onAddCard={onAddCard}
+            onAddTerminalCard={onAddTerminalCard}
+            onAddDungeonCard={onAddDungeonCard}
             onRemoveCard={onRemoveCard}
             sessionContext={sessionContext}
             shellContext={shellContext}
@@ -159,16 +168,29 @@ export function AppLayout({
           {cards.length === 0 ? (
             // Empty state: no cards, no terminals.
             <Text data-testid="main-empty-state" c="dimmed">
-              No card selected. Click + in the sidebar to add one.
+              No card selected. Click + in the sidebar to add a terminal or dungeon card.
             </Text>
           ) : (
             cards.map((card) => (
-              <CardPanel
-                key={card.id}
-                card={card}
-                onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
-                onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
-              />
+              // flex: 1, minHeight: 0 rather than height: 100% because AppShell.Main
+              // is already a flex column — flex children need flex: 1 to fill the
+              // available space, whereas height: 100% does not resolve reliably
+              // against a flex-column parent without an explicit definite height.
+              <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
+                {card.type === "terminal" ? (
+                  <Terminal
+                    sessionId={card.id}
+                    onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
+                    onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
+                  />
+                ) : card.type === "dungeon" ? (
+                  <Text data-testid={`dungeon-placeholder-${card.id}`} c="dimmed">
+                    Dungeon: under construction
+                  </Text>
+                ) : (
+                  assertNever(card.type)
+                )}
+              </Tabs.Panel>
             ))
           )}
         </AppShell.Main>

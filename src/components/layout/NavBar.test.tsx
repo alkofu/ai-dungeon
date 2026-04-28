@@ -25,7 +25,10 @@ function renderNavBar(ui: ReactElement) {
 }
 
 function makeCards(count: number) {
-  return Array.from({ length: count }, (_, i) => ({ id: `card-${String(i + 1)}` }));
+  return Array.from({ length: count }, (_, i) => ({
+    id: `card-${String(i + 1)}`,
+    type: "terminal" as const,
+  }));
 }
 
 describe("NavBar", () => {
@@ -33,7 +36,8 @@ describe("NavBar", () => {
     renderNavBar(
       <NavBar
         cards={[]}
-        onAddCard={vi.fn()}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
@@ -47,8 +51,12 @@ describe("NavBar", () => {
   it("renders provided cards with remove buttons", () => {
     renderNavBar(
       <NavBar
-        cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }, { id: "12345678" }]}
-        onAddCard={vi.fn()}
+        cards={[
+          { id: "abcdefgh-1234-5678-abcd-ef1234567890", type: "terminal" },
+          { id: "12345678", type: "terminal" },
+        ]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
@@ -60,25 +68,71 @@ describe("NavBar", () => {
     expect(screen.getByRole("button", { name: "Remove card 12345678" })).toBeInTheDocument();
   });
 
-  it("calls onAddCard when the Add card button is clicked", async () => {
-    const onAddCard = vi.fn();
-    const onRemoveCard = vi.fn();
+  it("clicking the trigger then the Terminal item calls onAddTerminalCard", async () => {
+    const onAddTerminalCard = vi.fn();
+    const onAddDungeonCard = vi.fn();
     const user = userEvent.setup();
 
     renderNavBar(
       <NavBar
         cards={[]}
-        onAddCard={onAddCard}
-        onRemoveCard={onRemoveCard}
+        onAddTerminalCard={onAddTerminalCard}
+        onAddDungeonCard={onAddDungeonCard}
+        onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
-    expect(onAddCard).toHaveBeenCalledTimes(1);
-    expect(onRemoveCard).not.toHaveBeenCalled();
+    expect(onAddTerminalCard).toHaveBeenCalledTimes(1);
+    expect(onAddDungeonCard).not.toHaveBeenCalled();
+  });
+
+  it("clicking the trigger then the Dungeon item calls onAddDungeonCard", async () => {
+    const onAddTerminalCard = vi.fn();
+    const onAddDungeonCard = vi.fn();
+    const user = userEvent.setup();
+
+    renderNavBar(
+      <NavBar
+        cards={[]}
+        onAddTerminalCard={onAddTerminalCard}
+        onAddDungeonCard={onAddDungeonCard}
+        onRemoveCard={vi.fn()}
+        sessionContext={{}}
+        shellContext={{}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Dungeon" }));
+
+    expect(onAddDungeonCard).toHaveBeenCalledTimes(1);
+    expect(onAddTerminalCard).not.toHaveBeenCalled();
+  });
+
+  it("opening the menu and pressing ArrowDown then Enter activates the first item (Terminal)", async () => {
+    const onAddTerminalCard = vi.fn();
+    const user = userEvent.setup();
+
+    renderNavBar(
+      <NavBar
+        cards={[]}
+        onAddTerminalCard={onAddTerminalCard}
+        onAddDungeonCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        sessionContext={{}}
+        shellContext={{}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    expect(onAddTerminalCard).toHaveBeenCalledTimes(1);
   });
 
   it("calls onRemoveCard with the correct id when a close button is clicked", async () => {
@@ -87,8 +141,12 @@ describe("NavBar", () => {
 
     renderNavBar(
       <NavBar
-        cards={[{ id: "a" }, { id: "b" }]}
-        onAddCard={vi.fn()}
+        cards={[
+          { id: "a", type: "terminal" },
+          { id: "b", type: "terminal" },
+        ]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
         shellContext={{}}
@@ -107,8 +165,9 @@ describe("NavBar", () => {
 
     renderNavBar(
       <NavBar
-        cards={[{ id: "a" }]}
-        onAddCard={vi.fn()}
+        cards={[{ id: "a", type: "terminal" }]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
         shellContext={{}}
@@ -129,8 +188,9 @@ describe("NavBar", () => {
 
     renderNavBar(
       <NavBar
-        cards={[{ id: "a" }]}
-        onAddCard={vi.fn()}
+        cards={[{ id: "a", type: "terminal" }]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
         shellContext={{}}
@@ -163,8 +223,9 @@ describe("NavBar", () => {
   it("applies width and overflow style declarations to Tabs.Tab so SessionCard does not overflow the navbar", () => {
     renderNavBar(
       <NavBar
-        cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890" }]}
-        onAddCard={vi.fn()}
+        cards={[{ id: "abcdefgh-1234-5678-abcd-ef1234567890", type: "terminal" }]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
@@ -192,7 +253,8 @@ describe("NavBar", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(3)}
-          onAddCard={vi.fn()}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
           onRemoveCard={vi.fn()}
           sessionContext={{}}
           shellContext={{}}
@@ -211,7 +273,8 @@ describe("NavBar", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(3)}
-          onAddCard={vi.fn()}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
           onRemoveCard={vi.fn()}
           sessionContext={{}}
           shellContext={{}}
@@ -228,7 +291,8 @@ describe("NavBar", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(11)}
-          onAddCard={vi.fn()}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
           onRemoveCard={vi.fn()}
           sessionContext={{}}
           shellContext={{}}
@@ -261,8 +325,9 @@ describe("NavBar", () => {
     renderWithProviders(
       <Tabs value={null} onChange={onChange} orientation="vertical">
         <NavBar
-          cards={[{ id: "a" }]}
-          onAddCard={vi.fn()}
+          cards={[{ id: "a", type: "terminal" }]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
           onRemoveCard={onRemoveCard}
           sessionContext={{}}
           shellContext={{}}
