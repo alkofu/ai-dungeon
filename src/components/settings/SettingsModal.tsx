@@ -1,4 +1,4 @@
-import { Modal, NumberInput, Select, Stack } from "@mantine/core";
+import { Alert, Modal, NumberInput, Select, Stack } from "@mantine/core";
 import { useSettings } from "../../settings/SettingsContext";
 
 interface SettingsModalProps {
@@ -7,11 +7,16 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ opened, onClose }: SettingsModalProps) {
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, saveError } = useSettings();
 
   return (
     <Modal opened={opened} onClose={onClose} title="Settings" size="md">
       <Stack>
+        {saveError !== null && (
+          <Alert color="red" title="Failed to save settings" data-testid="settings-save-error">
+            {saveError.message}
+          </Alert>
+        )}
         <Select
           label="Color scheme"
           value={settings.colorScheme}
@@ -22,7 +27,9 @@ export function SettingsModal({ opened, onClose }: SettingsModalProps) {
           ]}
           onChange={(value) => {
             if (value === "light" || value === "dark" || value === "auto") {
-              void updateSettings({ colorScheme: value });
+              updateSettings({ colorScheme: value }).catch((err) => {
+                console.error("[SettingsModal] updateSettings rejected:", err);
+              });
             }
           }}
         />
@@ -36,7 +43,9 @@ export function SettingsModal({ opened, onClose }: SettingsModalProps) {
             // Reject empty string and non-finite values — do NOT call updateSettings
             // with NaN or '' as these would corrupt the persisted settings.
             if (typeof value === "number" && isFinite(value)) {
-              void updateSettings({ terminal: { fontSize: value } });
+              updateSettings({ terminal: { fontSize: value } }).catch((err) => {
+                console.error("[SettingsModal] updateSettings rejected:", err);
+              });
             }
           }}
         />

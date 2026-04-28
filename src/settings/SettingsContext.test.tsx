@@ -155,10 +155,11 @@ describe("SettingsProvider", () => {
     const { SettingsProvider, useSettings } = await import("./SettingsContext");
 
     function Consumer() {
-      const { settings, updateSettings } = useSettings();
+      const { settings, updateSettings, saveError } = useSettings();
       return (
         <div>
           <span data-testid="scheme">{settings.colorScheme}</span>
+          {saveError !== null && <span data-testid="save-error">{saveError.message}</span>}
           <button
             onClick={() => {
               void updateSettings({ colorScheme: "dark" }).catch(() => {});
@@ -186,6 +187,77 @@ describe("SettingsProvider", () => {
     await waitFor(() => {
       expect(screen.getByTestId("scheme").textContent).toBe("auto");
     });
+
+    // saveError should be surfaced with the thrown message
+    await waitFor(() => {
+      expect(screen.getByTestId("save-error").textContent).toBe("disk full");
+    });
+  });
+
+  it("updateSettings clears saveError on the next successful save", async () => {
+    const saveSettingsMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce(undefined);
+
+    vi.doMock("./persistence", () => ({
+      loadSettings: vi.fn(() => Promise.resolve(DEFAULT_SETTINGS)),
+      saveSettings: saveSettingsMock,
+    }));
+
+    const { SettingsProvider, useSettings } = await import("./SettingsContext");
+
+    function Consumer() {
+      const { settings, updateSettings, saveError } = useSettings();
+      return (
+        <div>
+          <span data-testid="scheme">{settings.colorScheme}</span>
+          {saveError !== null && <span data-testid="save-error">{saveError.message}</span>}
+          <button
+            onClick={() => {
+              void updateSettings({ colorScheme: "dark" }).catch(() => {});
+            }}
+          >
+            Set dark
+          </button>
+          <button
+            onClick={() => {
+              void updateSettings({ colorScheme: "light" }).catch(() => {});
+            }}
+          >
+            Set light
+          </button>
+        </div>
+      );
+    }
+
+    await act(async () => {
+      render(
+        <SettingsProvider>
+          <Consumer />
+        </SettingsProvider>,
+      );
+    });
+
+    // First click: save fails → saveError is set, scheme stays "auto"
+    await act(async () => {
+      screen.getByText("Set dark").click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("save-error").textContent).toBe("disk full");
+    });
+    expect(screen.getByTestId("scheme").textContent).toBe("auto");
+
+    // Second click: save succeeds → saveError is cleared, scheme updates
+    await act(async () => {
+      screen.getByText("Set light").click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("scheme").textContent).toBe("light");
+    });
+    expect(screen.queryByTestId("save-error")).toBeNull();
   });
 
   it("useSettings throws when called outside a provider", async () => {

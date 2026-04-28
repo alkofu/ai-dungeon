@@ -30,6 +30,7 @@ type DeepPartial<T> = {
 interface SettingsContextValue {
   settings: Settings;
   updateSettings: (patch: DeepPartial<Settings>) => Promise<void>;
+  saveError: Error | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,7 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [saveError, setSaveError] = useState<Error | null>(null);
 
   useEffect(() => {
     void loadSettings().then((loaded) => {
@@ -70,17 +72,25 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     async (patch: DeepPartial<Settings>): Promise<void> => {
       if (settings === null) return;
       const merged = deepMergeSettings(settings, patch);
-      // Only update React state on successful persistence — a write failure must
-      // not leave the UI showing settings that are not on disk.
-      await saveSettings(merged);
-      setSettings(merged);
+      // Capture the error so consumers (e.g. SettingsModal) can render an inline
+      // message; re-throw so awaiting callers still observe the rejection.
+      try {
+        // Only update React state on successful persistence — a write failure must
+        // not leave the UI showing settings that are not on disk.
+        await saveSettings(merged);
+        setSaveError(null);
+        setSettings(merged);
+      } catch (err) {
+        setSaveError(err instanceof Error ? err : new Error(String(err)));
+        throw err;
+      }
     },
     [settings],
   );
 
   const contextValue = useMemo(
-    () => (settings === null ? null : { settings, updateSettings }),
-    [settings, updateSettings],
+    () => (settings === null ? null : { settings, updateSettings, saveError }),
+    [settings, updateSettings, saveError],
   );
 
   // Return null until loadSettings resolves — this prevents any consumer from
