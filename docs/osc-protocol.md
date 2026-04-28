@@ -155,6 +155,14 @@ repository root — because the shell may not have access to the full `owner/nam
 Only the `branch` field is dispatched in that case; the `repo` field from a prior OSC 6800
 SessionContext is not overwritten.
 
+**Unborn-HEAD edge case.** When a repository has been initialised (`git init`) but has no
+commits yet, both `git symbolic-ref --short HEAD` and `git rev-parse --short HEAD` fail and
+produce empty output. In this state the shell hook emits a **cleared** OSC 7337 (the first
+shape above) rather than a tab-delimited payload with an empty branch field. A tab-delimited
+payload with an empty branch (`repo<TAB>`) is rejected by `parseOsc7337Payload` as invalid
+and would be silently dropped by the frontend. The cleared shape is the correct signal: the
+UI clears any stale git context explicitly rather than leaving stale state on display.
+
 ### Validation (owner/name case)
 
 Each segment must: be non-empty, be ≤ 256 chars, contain no ASCII control characters,
@@ -249,7 +257,15 @@ OSC 7 and OSC 7337 are typically emitted by shell `precmd` / `PROMPT_COMMAND` ho
 Standard integrations (e.g. iTerm2 shell integration, Starship) already emit OSC 7.
 OSC 7337 requires a custom hook that queries `git rev-parse --abbrev-ref HEAD` and
 `basename "$(git rev-parse --show-toplevel)"`. Emit the empty OSC 7337 payload
-(`\033]7337;\007`) when the current directory is not inside a git repository.
+(`\033]7337;\007`) when the current directory is not inside a git repository, or when
+the branch cannot be determined (e.g. a freshly initialised repo with no commits yet).
+
+**OSC 7 emission frequency.** The built-in ai-dungeon hook emits OSC 7 only when `$PWD`
+has changed since the previous emission, tracked in the session-scoped shell variable
+`__ai_dungeon_last_cwd`. OSC 7 is always emitted on the first prompt of a session (the
+variable is unset initially, so the inequality always holds). OSC 7337 is emitted on every
+prompt regardless. Custom producer hooks that emit OSC 7 unconditionally on every prompt are
+also correct — the frontend handles repeated identical payloads gracefully.
 
 ---
 
@@ -285,6 +301,14 @@ The sequence of events is:
 
 Both events are emitted within the same prompt cycle, so the stale display window is
 sub-prompt in duration and self-corrects without any coordination required.
+
+### Unborn-HEAD repositories
+
+A repository created with `git init` but with no commits has an unborn HEAD. In this state
+neither `git symbolic-ref --short HEAD` nor `git rev-parse --short HEAD` succeeds, so the
+shell hook cannot determine a branch name. The hook emits a cleared OSC 7337 payload, causing
+the UI to display no branch or repo on the card. Once the first commit is made and the user
+triggers a new prompt, the hook emits a normal OSC 7337 payload and the branch renders.
 
 ### Replacement semantics
 

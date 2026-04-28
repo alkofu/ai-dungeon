@@ -52,13 +52,33 @@ use tauri::{AppHandle, Emitter, State};
 //      (git context) after every prompt.
 //   2. Wires the function into the prompt cycle for bash and zsh.
 //   3. Is a single newline-terminated line suitable for embedding in an rc file.
+//
+// OSC 7 is emitted only when `$PWD` differs from the previously emitted value
+// (tracked in shell variable `__ai_dungeon_last_cwd`). OSC 7337 is emitted on
+// every prompt regardless.
+//
+// The variable `__ai_dungeon_last_cwd` is intentionally a shell-global variable
+// (no `local`) scoped to the session lifetime. The defensive `__ai_dungeon_`
+// prefix avoids collisions with user shell namespace. It is not exported, so it
+// does not leak to child processes.
+//
+// The first-prompt OSC 7 guarantee depends on `${__ai_dungeon_last_cwd-}`
+// expanding to empty when the variable is unset. `${PWD}` is always non-empty
+// in an interactive shell, so the inequality always holds on the first prompt
+// and OSC 7 always fires regardless of the starting CWD.
 #[cfg(unix)]
 const SHELL_INIT_POLYGLOT: &str = concat!(
     // Define the context-emission function.
     "__ai_dungeon_emit_ctx() {",
-    // Emit OSC 7: file://hostname/cwd for the current working directory.
-    // Uses ${HOST:-${HOSTNAME}}: zsh exports $HOST, bash exports $HOSTNAME.
-    " printf '\\033]7;file://%s%s\\033\\\\' \"${HOST:-${HOSTNAME}}\" \"${PWD}\";",
+    // Emit OSC 7: file://hostname/cwd for the current working directory, but
+    // only when $PWD has changed since the last emission. Uses
+    // ${__ai_dungeon_last_cwd-} (expands to empty when unset) so the inequality
+    // always holds on the first prompt, guaranteeing OSC 7 fires at session start
+    // regardless of the starting CWD.
+    " if [ \"${PWD}\" != \"${__ai_dungeon_last_cwd-}\" ]; then",
+    "  printf '\\033]7;file://%s%s\\033\\\\' \"${HOST:-${HOSTNAME}}\" \"${PWD}\";",
+    "  __ai_dungeon_last_cwd=\"${PWD}\";",
+    " fi;",
     // Fast pre-check — exits non-zero immediately outside a git repo (traverses
     // up to first mount point). On network filesystems or very deep trees this
     // may add prompt latency.
@@ -70,7 +90,16 @@ const SHELL_INIT_POLYGLOT: &str = concat!(
     "  if [ -n \"$repo_top\" ]; then",
     "   repo=$(basename \"$repo_top\");",
     "   branch=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null);",
-    "   printf '\\033]7337;%s\\t%s\\033\\\\' \"$repo\" \"$branch\";",
+    // Guard: emit OSC 7337 with payload only when $branch is non-empty. When
+    // both `symbolic-ref --short HEAD` and `rev-parse --short HEAD` fail (e.g.
+    // a repo with a broken or unresolvable HEAD), $branch is empty and we emit
+    // a cleared OSC 7337 instead of a tab-delimited payload with an empty branch
+    // field (`repo<TAB>`), which would be misinterpreted by the UI.
+    "   if [ -n \"$branch\" ]; then",
+    "    printf '\\033]7337;%s\\t%s\\033\\\\' \"$repo\" \"$branch\";",
+    "   else",
+    "    printf '\\033]7337;\\033\\\\';",
+    "   fi;",
     "  else",
     // Inside a .git directory or bare repo — emit empty payload to clear git context.
     "   printf '\\033]7337;\\033\\\\';",
@@ -78,7 +107,7 @@ const SHELL_INIT_POLYGLOT: &str = concat!(
     " else",
     // Not in a git repo — emit empty OSC 7337 payload to clear stale git state.
     "  printf '\\033]7337;\\033\\\\';",
-    " fi",
+    " fi;",
     "}; ",
     // Wire into zsh via add-zsh-hook (deduplication-safe, append-style).
     "if [ -n \"$ZSH_VERSION\" ]; then",
@@ -836,7 +865,158 @@ mod tests {
         }
     }
 
+    // ── Shell-polyglot execution harness ─────────────────────────────────────
+
+    /// Run `SHELL_INIT_POLYGLOT` followed by `extra_commands` in a real `bash -c`
+    /// subprocess and return the captured stdout bytes.
+    ///
+    /// This harness lets tests assert on actual shell output rather than on the
+    /// Rust string content of `SHELL_INIT_POLYGLOT` (which would be tautological).
+    #[cfg(unix)]
+    fn capture_polyglot_output(cwd: &std::path::Path, extra_commands: &str) -> Vec<u8> {
+        use std::process::Command;
+        let script = format!("{}\n{}\n", SHELL_INIT_POLYGLOT, extra_commands);
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(&script)
+            .current_dir(cwd)
+            .output()
+            .expect("bash must be available on the test host");
+        assert!(
+            output.status.success(),
+            "bash exited non-zero: stderr={}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+        output.stdout
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────────
+
+    /// Sanity-check: `capture_polyglot_output` must produce at least one OSC 7
+    /// sequence (the `file://` URI) when `__ai_dungeon_emit_ctx` is called in a
+    /// plain (non-git) directory.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn polyglot_harness_emits_osc7_in_a_normal_directory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stdout = capture_polyglot_output(tmp.path(), "__ai_dungeon_emit_ctx");
+        let needle = b"\x1b]7;file://";
+        assert!(
+            stdout.windows(needle.len()).any(|w| w == needle),
+            "expected OSC 7 in stdout, got: {:?}",
+            String::from_utf8_lossy(&stdout),
+        );
+    }
+
+    /// When `$branch` cannot be determined (both `git symbolic-ref --short HEAD`
+    /// and `git rev-parse --short HEAD` return empty/fail), the polyglot must
+    /// emit a cleared OSC 7337 (`ESC ] 7337 ; ESC \`) rather than a
+    /// tab-delimited payload with an empty branch field (`repo<TAB>`).
+    ///
+    /// The empty-branch scenario is produced by: `git init`, then writing
+    /// `.git/HEAD` to a broken ref that no git command can resolve. This forces
+    /// both branch-resolution commands to fail while `--show-toplevel` still
+    /// succeeds (the repo structure is intact).
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_init_polyglot_emits_cleared_osc_7337_when_branch_is_empty() {
+        use std::process::Command;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let init_status = Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git must be available");
+        assert!(init_status.success(), "git init must succeed");
+
+        // Force HEAD to a broken state so that both `symbolic-ref --short HEAD`
+        // and `rev-parse --short HEAD` return non-zero / empty, making $branch
+        // empty in the polyglot. Writing a truncated ref name is the most
+        // portable way to achieve this across git versions.
+        std::fs::write(tmp.path().join(".git/HEAD"), "ref: refs/heads/")
+            .expect("must be able to write .git/HEAD");
+
+        let stdout = capture_polyglot_output(tmp.path(), "__ai_dungeon_emit_ctx");
+
+        // Cleared OSC 7337 must be present
+        let cleared_needle: &[u8] = b"\x1b]7337;\x1b\\";
+        assert!(
+            stdout.windows(cleared_needle.len()).any(|w| w == cleared_needle),
+            "expected cleared OSC 7337 in stdout, got: {:?}",
+            String::from_utf8_lossy(&stdout),
+        );
+
+        // Tab-delimited OSC 7337 with empty branch must NOT be present
+        let osc7337_open: &[u8] = b"\x1b]7337;";
+        for i in 0..stdout.len() {
+            if stdout[i..].starts_with(osc7337_open) {
+                let after_open = &stdout[i + osc7337_open.len()..];
+                if let Some(esc_idx) = after_open.iter().position(|&b| b == 0x1b) {
+                    let payload = &after_open[..esc_idx];
+                    assert!(
+                        !(!payload.is_empty() && payload.ends_with(b"\t")),
+                        "tab-delimited OSC 7337 with empty branch must not appear, got: {:?}",
+                        String::from_utf8_lossy(&stdout),
+                    );
+                }
+            }
+        }
+    }
+
+    /// When `__ai_dungeon_emit_ctx` is called twice in the same CWD, OSC 7 must
+    /// be emitted exactly once — the second call must be suppressed by the
+    /// `__ai_dungeon_last_cwd` debounce variable.
+    ///
+    /// This is a regression guard: without the debounce, two prompt firings in
+    /// the same directory would emit two OSC 7 sequences, flooding the terminal
+    /// with redundant CWD updates.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_init_polyglot_emits_osc7_only_once_when_cwd_is_unchanged() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stdout = capture_polyglot_output(
+            tmp.path(),
+            "__ai_dungeon_emit_ctx; __ai_dungeon_emit_ctx",
+        );
+        let needle = b"\x1b]7;file://";
+        let count = stdout.windows(needle.len()).filter(|w| *w == needle).count();
+        assert_eq!(
+            count, 1,
+            "expected exactly 1 OSC 7 emission across two prompts in same CWD, got {count}; stdout: {:?}",
+            String::from_utf8_lossy(&stdout),
+        );
+    }
+
+    /// After a `cd`, the next `__ai_dungeon_emit_ctx` call must re-emit OSC 7
+    /// because the CWD has changed (the debounce variable tracks the old CWD).
+    /// OSC 7337 must still fire on every prompt regardless of the CWD debounce.
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn shell_init_polyglot_re_emits_osc7_after_cd() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let inner = tmp.path().join("inner");
+        std::fs::create_dir(&inner).expect("mkdir inner");
+        let cmd = format!(
+            "__ai_dungeon_emit_ctx; cd {}; __ai_dungeon_emit_ctx",
+            inner.display(),
+        );
+        let stdout = capture_polyglot_output(tmp.path(), &cmd);
+        let needle = b"\x1b]7;file://";
+        let count = stdout.windows(needle.len()).filter(|w| *w == needle).count();
+        assert_eq!(
+            count, 2,
+            "expected exactly 2 OSC 7 emissions across two prompts with cd between, got {count}; stdout: {:?}",
+            String::from_utf8_lossy(&stdout),
+        );
+        // Also verify OSC 7337 still fires on every prompt (cadence unchanged)
+        let osc7337_needle = b"\x1b]7337;";
+        let osc7337_count = stdout.windows(osc7337_needle.len()).filter(|w| *w == osc7337_needle).count();
+        assert_eq!(osc7337_count, 2, "expected OSC 7337 on every prompt regardless of CWD");
+    }
 
     /// `try_reserve_session_id` must return `Ok(1)` on the first call, then
     /// `Err("session already exists: …")` on the second call with the same sid,
