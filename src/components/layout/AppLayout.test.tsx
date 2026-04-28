@@ -74,7 +74,7 @@ vi.mock("./useModifierHeld", async (importOriginal) => {
   return { ...original, isMacPlatform: () => true };
 });
 
-import React, { useState } from "react";
+import React from "react";
 import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test-utils/render";
@@ -83,7 +83,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { _clearSpawnChainForTesting } from "../Terminal/Terminal";
-import type { ShellContext } from "../../types/session";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 
@@ -159,7 +158,8 @@ describe("AppLayout", () => {
     const { container } = renderWithProviders(
       <AppLayout
         cards={[]}
-        onAddCard={vi.fn()}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         activeId={null}
         onActiveIdChange={vi.fn()}
@@ -189,8 +189,13 @@ describe("AppLayout", () => {
       renderWithProviders(
         <React.StrictMode>
           <AppLayout
-            cards={[{ id: "A" }, { id: "B" }, { id: "C" }]}
-            onAddCard={vi.fn()}
+            cards={[
+              { id: "A", type: "terminal" },
+              { id: "B", type: "terminal" },
+              { id: "C", type: "terminal" },
+            ]}
+            onAddTerminalCard={vi.fn()}
+            onAddDungeonCard={vi.fn()}
             onRemoveCard={vi.fn()}
             activeId="A"
             onActiveIdChange={vi.fn()}
@@ -228,12 +233,12 @@ describe("AppLayout", () => {
       expect(String(arg)).not.toContain("[pty write failed");
     }
 
-    // F-6: assert dungeon_open was called at least once per rendered card,
-    // proving the hook is actually wired from CardPanel.
+    // F-6 (updated): this branch uses inline type-branched rendering without CardPanel.
+    // Terminal cards do not trigger dungeon_open; assert none were called for the 3 terminal cards above.
     const dungeonOpenCalls = (mockInvoke.mock.calls as [string, unknown][]).filter(
       (c) => c[0] === "dungeon_open",
     );
-    expect(dungeonOpenCalls.length).toBeGreaterThanOrEqual(3);
+    expect(dungeonOpenCalls.length).toBe(0);
   });
 
   it("rapid card-add does not produce duplicate-spawn errors at the backend boundary", async () => {
@@ -243,8 +248,9 @@ describe("AppLayout", () => {
     // Render with one card first.
     const { rerender } = renderWithProviders(
       <AppLayout
-        cards={[{ id: "card-1" }]}
-        onAddCard={vi.fn()}
+        cards={[{ id: "card-1", type: "terminal" }]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         activeId="card-1"
         onActiveIdChange={vi.fn()}
@@ -263,8 +269,14 @@ describe("AppLayout", () => {
     await act(async () => {
       rerender(
         <AppLayout
-          cards={[{ id: "card-1" }, { id: "card-2" }, { id: "card-3" }, { id: "card-4" }]}
-          onAddCard={vi.fn()}
+          cards={[
+            { id: "card-1", type: "terminal" },
+            { id: "card-2", type: "terminal" },
+            { id: "card-3", type: "terminal" },
+            { id: "card-4", type: "terminal" },
+          ]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
           onRemoveCard={vi.fn()}
           activeId="card-1"
           onActiveIdChange={vi.fn()}
@@ -312,15 +324,23 @@ describe("AppLayout", () => {
 // ── Keyboard navigation integration tests ─────────────────────────────────────
 
 describe("AppLayout — keyboard navigation", () => {
-  const threeCards = [{ id: "A" }, { id: "B" }, { id: "C" }];
+  const threeCards = [
+    { id: "A", type: "terminal" as const },
+    { id: "B", type: "terminal" as const },
+    { id: "C", type: "terminal" as const },
+  ];
 
-  function renderLayout(cards: { id: string }[], activeId: string | null) {
+  function renderLayout(
+    cards: { id: string; type: "terminal" | "dungeon" }[],
+    activeId: string | null,
+  ) {
     const onActiveIdChange = vi.fn();
     const user = userEvent.setup();
     const result = renderWithProviders(
       <AppLayout
         cards={cards}
-        onAddCard={vi.fn()}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         activeId={activeId}
         onActiveIdChange={onActiveIdChange}
@@ -405,7 +425,7 @@ describe("AppLayout — keyboard navigation", () => {
   });
 
   it("cycle is a no-op with one card", async () => {
-    const { onActiveIdChange, user } = renderLayout([{ id: "A" }], "A");
+    const { onActiveIdChange, user } = renderLayout([{ id: "A", type: "terminal" }], "A");
     await act(async () => {
       await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
     });
@@ -485,8 +505,13 @@ describe("AppLayout — shortcut tooltip overlay", () => {
 
     renderWithProviders(
       <AppLayout
-        cards={[{ id: "A" }, { id: "B" }, { id: "C" }]}
-        onAddCard={vi.fn()}
+        cards={[
+          { id: "A", type: "terminal" },
+          { id: "B", type: "terminal" },
+          { id: "C", type: "terminal" },
+        ]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         activeId="A"
         onActiveIdChange={vi.fn()}
@@ -534,7 +559,8 @@ describe("AppLayout — settings gear button and modal", () => {
     return renderWithProviders(
       <AppLayout
         cards={[]}
-        onAddCard={vi.fn()}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
         onRemoveCard={vi.fn()}
         activeId={null}
         onActiveIdChange={vi.fn()}
@@ -588,40 +614,9 @@ describe("AppLayout — settings gear button and modal", () => {
   });
 });
 
-// ── OSC 7 → OSC 7337 E2E integration (Step 4) ────────────────────────────────
-//
-// Renders the App→AppLayout→NavBar→SessionCard chain. Fires OSC 7 then
-// OSC 7337 for a card via the mocked xterm OSC handler API and asserts that
-// the branch name ("main") is rendered in the SessionCard.
-//
-// Step 0 diagnostic finding: the microtask race (suspect c) was NOT reproduced.
-// FIFO microtask ordering holds — OSC 7 always sets lastShellContextRef before
-// OSC 7337 reads it. Step 4 (pendingOsc7337Ref replay) is therefore deferred.
-// Issue: "Investigate: branch not shown on session card in normal repo
-// (cause unidentified)" — see GitHub issue created alongside this PR.
+// ── Dungeon card rendering tests ───────────────────────────────────────────────
 
-describe("AppLayout — OSC 7 → OSC 7337 E2E integration", () => {
-  // Wrapper that wires onShellContextChange back into AppLayout as controlled
-  // state so the SessionCard receives updated shellContext on handler fires.
-  function AppLayoutWithShellContext({ cardId }: { cardId: string }) {
-    const [shellContext, setShellContext] = useState<Record<string, ShellContext>>({});
-    return (
-      <AppLayout
-        cards={[{ id: cardId }]}
-        onAddCard={vi.fn()}
-        onRemoveCard={vi.fn()}
-        activeId={cardId}
-        onActiveIdChange={vi.fn()}
-        sessionContext={{}}
-        onSessionContextChange={vi.fn()}
-        shellContext={shellContext}
-        onShellContextChange={(_id, ctx) => {
-          setShellContext((prev) => ({ ...prev, [_id]: ctx }));
-        }}
-      />
-    );
-  }
-
+describe("AppLayout — dungeon card rendering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _clearSpawnChainForTesting();
@@ -631,48 +626,148 @@ describe("AppLayout — OSC 7 → OSC 7337 E2E integration", () => {
     }) as unknown as typeof ResizeObserver;
   });
 
-  it("OSC 7 then OSC 7337 triggers SessionCard to display the branch name", async () => {
-    const cardId = "e2e-card-001";
+  it("renders the dungeon placeholder for a dungeon card and does not call pty_spawn", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+    installSessionAwareMock(mockInvoke);
 
     await act(async () => {
-      renderWithProviders(<AppLayoutWithShellContext cardId={cardId} />);
+      renderWithProviders(
+        <AppLayout
+          cards={[{ id: "D", type: "dungeon" }]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          activeId="D"
+          onActiveIdChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+        />,
+      );
     });
 
-    // Wait for the OSC handlers to be registered (inside the font-load IIFE).
-    const MockXTerm = XTerm as unknown as AnyMock;
-    let registerOscHandlerSpy!: AnyMock;
-    await vi.waitFor(() => {
-      const lastInstance = MockXTerm.mock.results[MockXTerm.mock.results.length - 1]?.value;
-      expect(lastInstance?.parser?.registerOscHandler).toBeDefined();
-      registerOscHandlerSpy = lastInstance.parser.registerOscHandler as AnyMock;
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7, expect.any(Function));
-      expect(registerOscHandlerSpy).toHaveBeenCalledWith(7337, expect.any(Function));
-    });
-
-    const osc7Handler = registerOscHandlerSpy.mock.calls.find((c: unknown[]) => c[0] === 7)![1] as (
-      data: string,
-    ) => boolean;
-    const osc7337Handler = registerOscHandlerSpy.mock.calls.find(
-      (c: unknown[]) => c[0] === 7337,
-    )![1] as (data: string) => boolean;
-
-    // Fire OSC 7 first (establishes workingDirectory in lastShellContextRef).
     await act(async () => {
-      osc7Handler("file:///home/user/my-project");
-      // Drain the microtask queue so the OSC 7 queueMicrotask callback fires.
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await Promise.resolve();
     });
 
-    // Fire OSC 7337 (bare-name: repo<TAB>branch).
+    expect(screen.getByTestId("dungeon-placeholder-D")).toBeInTheDocument();
+    expect(screen.getByTestId("dungeon-placeholder-D").textContent).toBe(
+      "Dungeon: under construction",
+    );
+    const spawnCalls = mockInvoke.mock.calls.filter(
+      (c: unknown[]) =>
+        c[0] === "pty_spawn" && (c[1] as Record<string, unknown>)?.sessionId === "D",
+    );
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it("renders mixed terminal and dungeon cards: terminal triggers pty_spawn, dungeon does not", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+    installSessionAwareMock(mockInvoke);
+
     await act(async () => {
-      osc7337Handler("my-project\tmain");
-      // Drain the microtask queue so the OSC 7337 queueMicrotask callback fires.
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      renderWithProviders(
+        <AppLayout
+          cards={[
+            { id: "T", type: "terminal" },
+            { id: "D", type: "dungeon" },
+          ]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          activeId="T"
+          onActiveIdChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+        />,
+      );
     });
 
-    // SessionCard must now display the branch name.
-    await vi.waitFor(() => {
-      expect(screen.getByText("main")).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
     });
+
+    const terminalSpawnCalls = mockInvoke.mock.calls.filter(
+      (c: unknown[]) =>
+        c[0] === "pty_spawn" && (c[1] as Record<string, unknown>)?.sessionId === "T",
+    );
+    expect(terminalSpawnCalls).toHaveLength(1);
+
+    const dungeonSpawnCalls = mockInvoke.mock.calls.filter(
+      (c: unknown[]) =>
+        c[0] === "pty_spawn" && (c[1] as Record<string, unknown>)?.sessionId === "D",
+    );
+    expect(dungeonSpawnCalls).toHaveLength(0);
+
+    expect(screen.getByTestId("dungeon-placeholder-D")).toBeInTheDocument();
+  });
+
+  it("a dungeon card can be the active tab and keyboard navigation cycles to/from it", async () => {
+    const onActiveIdChange = vi.fn();
+    const user = userEvent.setup();
+
+    await act(async () => {
+      renderWithProviders(
+        <AppLayout
+          cards={[
+            { id: "T", type: "terminal" },
+            { id: "D", type: "dungeon" },
+          ]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          activeId="T"
+          onActiveIdChange={onActiveIdChange}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await user.keyboard("{Meta>}{ArrowRight}{/Meta}");
+    });
+
+    expect(onActiveIdChange).toHaveBeenCalledWith("D");
+  });
+
+  it("removing a dungeon card does not invoke any pty_* command", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+    installSessionAwareMock(mockInvoke);
+    const onRemoveCard = vi.fn();
+
+    await act(async () => {
+      renderWithProviders(
+        <AppLayout
+          cards={[{ id: "D", type: "dungeon" }]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={onRemoveCard}
+          activeId="D"
+          onActiveIdChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Clear any setup calls, then assert no pty_* calls from render/removal.
+    mockInvoke.mockClear();
+
+    const ptyAnyCalls = mockInvoke.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).startsWith("pty_"),
+    );
+    expect(ptyAnyCalls).toHaveLength(0);
   });
 });

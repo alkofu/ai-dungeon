@@ -22,7 +22,7 @@ async function flushPromises(): Promise<void> {
     // 5 iterations covers the max promise-chain depth:
     // open(.then) + catch + close(.then) + catch = 4 hops; 5 gives one extra for safety.
     await Array.from({ length: 5 }).reduce(
-      (chain) => chain.then(() => Promise.resolve()),
+      (chain: Promise<void>) => chain.then(() => Promise.resolve()),
       Promise.resolve(),
     );
   });
@@ -41,7 +41,7 @@ describe("useDungeonSidecar", () => {
   });
 
   it("calls dungeon_open on mount and dungeon_close on unmount", async () => {
-    const card: Card = { id: "test-card-1" };
+    const card: Card = { id: "test-card-1", type: "dungeon" as const };
 
     const { unmount } = renderHook(() => useDungeonSidecar(card));
 
@@ -59,7 +59,7 @@ describe("useDungeonSidecar", () => {
   it("does not call invoke when isDungeonCard returns false", async () => {
     vi.spyOn(cardModule, "isDungeonCard").mockReturnValue(false);
 
-    const card: Card = { id: "non-dungeon-card" };
+    const card: Card = { id: "non-dungeon-card", type: "terminal" as const };
     const { unmount } = renderHook(() => useDungeonSidecar(card));
 
     await flushPromises();
@@ -75,7 +75,7 @@ describe("useDungeonSidecar", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mockInvoke.mockRejectedValue(new Error("IPC error"));
 
-    const card: Card = { id: "error-card" };
+    const card: Card = { id: "error-card", type: "dungeon" as const };
 
     renderHook(() => useDungeonSidecar(card));
 
@@ -88,7 +88,7 @@ describe("useDungeonSidecar", () => {
   });
 
   it("calls dungeon_open exactly once when re-rendered with the same card.id", async () => {
-    const card: Card = { id: "stable-id" };
+    const card: Card = { id: "stable-id", type: "dungeon" as const };
 
     const { rerender } = renderHook(() => useDungeonSidecar(card));
 

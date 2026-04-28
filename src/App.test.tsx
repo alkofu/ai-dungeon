@@ -6,6 +6,7 @@ import { App, appReducer } from "./App";
 import type { AppState } from "./App";
 import type { SessionContext, ShellContext } from "./types/session";
 import { invoke } from "@tauri-apps/api/core";
+import { Terminal } from "./components/Terminal/Terminal";
 
 // Capture the latest callbacks passed to the Terminal mock so
 // integration tests can fire OSC context changes through the full plumbing.
@@ -105,7 +106,8 @@ describe("App", () => {
     expect(screen.queryByTestId("terminal-root")).toBeNull();
 
     // Add a card — terminal should appear.
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     expect(screen.getByTestId("terminal-root")).toBeInTheDocument();
     // Empty state disappears once a card exists.
@@ -116,7 +118,8 @@ describe("App", () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     const removeButton = screen.getByRole("button", { name: /Remove card/i });
     expect(removeButton).toBeInTheDocument();
@@ -136,8 +139,10 @@ describe("App", () => {
     renderWithProviders(<App />);
 
     // Add two cards.
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     // Both terminals are mounted because keepMounted=true.
     expect(screen.queryAllByTestId("terminal-root")).toHaveLength(2);
@@ -166,9 +171,12 @@ describe("App", () => {
     renderWithProviders(<App />);
 
     // Add three cards: A (active), B, C.
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(3);
@@ -208,9 +216,12 @@ describe("App", () => {
     renderWithProviders(<App />);
 
     // Add three cards A, B, C. A is active (first-add rule).
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     const tabs = screen.getAllByRole("tab");
 
@@ -234,8 +245,10 @@ describe("App", () => {
     renderWithProviders(<App />);
 
     // Add two cards.
-    await user.click(screen.getByRole("button", { name: "Add card" }));
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     // Both spawns happen synchronously relative to user events. Drain the
     // microtask queue to ensure any async IIFE cancelled-path activity (which
@@ -273,7 +286,8 @@ describe("App", () => {
     renderWithProviders(<App />);
 
     // Add a card so there is an active tab.
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(1);
@@ -295,7 +309,8 @@ describe("App", () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     // Fire the onSessionContextChange callback captured from the Terminal mock.
     await act(async () => {
@@ -312,11 +327,32 @@ describe("App", () => {
     expect(screen.getByText("backend-service")).toBeInTheDocument();
   });
 
+  it("adding a dungeon card from the menu mounts the placeholder, not a Terminal, and does not invoke pty_spawn", async () => {
+    const mockInvoke = invoke as unknown as AnyMock;
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    // Open the menu and pick "Dungeon".
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Dungeon" }));
+
+    // No terminal root rendered.
+    expect(screen.queryByTestId("terminal-root")).toBeNull();
+    // Dungeon placeholder is in the DOM.
+    expect(screen.getByText("Dungeon: under construction")).toBeInTheDocument();
+    // No pty_spawn invocation.
+    const spawnCalls = mockInvoke.mock.calls.filter((c: unknown[]) => c[0] === "pty_spawn");
+    expect(spawnCalls).toHaveLength(0);
+    // The mocked Terminal factory was never called.
+    expect(Terminal).not.toHaveBeenCalled();
+  });
+
   it("setShellContext populates state.shellContext[id] independently of state.sessionContext[id]", async () => {
     const user = userEvent.setup();
     renderWithProviders(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Add card" }));
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
 
     // Fire onShellContextChange — should NOT affect sessionContext.
     await act(async () => {
@@ -335,7 +371,7 @@ describe("App", () => {
 
 describe("appReducer", () => {
   it("activate ignores null while cards exist", () => {
-    const card = { id: "test-uuid-1" };
+    const card = { id: "test-uuid-1", type: "terminal" as const };
     const state: AppState = {
       cards: [card],
       activeId: "test-uuid-1",
@@ -352,7 +388,7 @@ describe("appReducer", () => {
   });
 
   it("setSessionContext stores ctx keyed by card id", () => {
-    const card = { id: "card-1" };
+    const card = { id: "card-1", type: "terminal" as const };
     const state: AppState = {
       cards: [card],
       activeId: "card-1",
@@ -386,7 +422,12 @@ describe("appReducer", () => {
       repo: { owner: "acme", name: "widgets" },
     };
     const stateAfterFirst = appReducer(
-      { cards: [{ id: "card-1" }], activeId: null, sessionContext: {}, shellContext: {} },
+      {
+        cards: [{ id: "card-1", type: "terminal" as const }],
+        activeId: null,
+        sessionContext: {},
+        shellContext: {},
+      },
       { type: "setSessionContext", id: "card-1", ctx: firstCtx },
     );
     const stateAfterSecond = appReducer(stateAfterFirst, {
@@ -413,7 +454,7 @@ describe("appReducer", () => {
   });
 
   it("remove cleans up sessionContext for the removed card", () => {
-    const card = { id: "card-1" };
+    const card = { id: "card-1", type: "terminal" as const };
     const ctx = {
       sessionTs: "20260425-120000",
       slug: "test",
@@ -433,7 +474,7 @@ describe("appReducer", () => {
 
   it("setShellContext stores ShellContext keyed by card id", () => {
     const state: AppState = {
-      cards: [{ id: "card-1" }],
+      cards: [{ id: "card-1", type: "terminal" as const }],
       activeId: "card-1",
       sessionContext: {},
       shellContext: {},
@@ -450,11 +491,45 @@ describe("appReducer", () => {
     expect(result).toBe(state); // referential equality — no-op
   });
 
+  it("add with cardType='dungeon' produces one dungeon card as activeId", () => {
+    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const result = appReducer(state, { type: "add", cardType: "dungeon" });
+    expect(result.cards).toHaveLength(1);
+    expect(result.cards[0].type).toBe("dungeon");
+    expect(result.activeId).toBe(result.cards[0].id);
+  });
+
+  it("add terminal then dungeon produces two cards in insertion order with dungeon active", () => {
+    const s0: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const s1 = appReducer(s0, { type: "add", cardType: "terminal" });
+    const s2 = appReducer(s1, { type: "add", cardType: "dungeon" });
+    expect(s2.cards).toHaveLength(2);
+    expect(s2.cards[0].type).toBe("terminal");
+    expect(s2.cards[1].type).toBe("dungeon");
+    expect(s2.activeId).toBe(s2.cards[1].id);
+  });
+
+  it("remove dungeon card is pure — does not invoke any Tauri command", () => {
+    const terminalCard = { id: "term-1", type: "terminal" as const };
+    const dungeonCard = { id: "dung-1", type: "dungeon" as const };
+    const state: AppState = {
+      cards: [terminalCard, dungeonCard],
+      activeId: "term-1",
+      sessionContext: {},
+      shellContext: {},
+    };
+    const result = appReducer(state, { type: "remove", id: "dung-1" });
+    expect(result.cards).toHaveLength(1);
+    expect(result.cards[0].id).toBe("term-1");
+    // Reducer is pure — no Tauri commands should be called.
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("setShellContext overwrites prior ShellContext (full replacement)", () => {
     const firstCtx: ShellContext = { workingDirectory: "/old", branch: "old-branch" };
     const secondCtx: ShellContext = { workingDirectory: "/new", branch: "new-branch" };
     const state: AppState = {
-      cards: [{ id: "card-1" }],
+      cards: [{ id: "card-1", type: "terminal" as const }],
       activeId: "card-1",
       sessionContext: {},
       shellContext: { "card-1": firstCtx },
@@ -468,7 +543,7 @@ describe("appReducer", () => {
   it("remove deletes per-card entry from shellContext", () => {
     const ctx: ShellContext = { workingDirectory: "/home/user", branch: "main" };
     const state: AppState = {
-      cards: [{ id: "card-1" }],
+      cards: [{ id: "card-1", type: "terminal" as const }],
       activeId: "card-1",
       sessionContext: {},
       shellContext: { "card-1": ctx },

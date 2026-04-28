@@ -17,7 +17,7 @@ ai-dungeon/
 │   │   └── fonts.css # @font-face declarations for MesloLGS NF (all four faces)
 │   ├── App.tsx       # Root component — useReducer for cards + activeId; owns tab state
 │   ├── types/
-│   │   ├── card.ts               # Card type ({ id: string }) + isDungeonCard() predicate
+│   │   ├── card.ts               # Card interface ({ id: string; type: CardType }) and CardType = "terminal" | "dungeon"; type is set at creation and never mutated
 │   │   ├── session.ts            # SessionContext (OSC 6800) and ShellContext (OSC 7/7337) interfaces; all values are UNTRUSTED. branch and repo are optional on both types (cleared by empty OSC 7337).
 │   │   ├── sessionPayload.ts     # parseSessionContextPayload() / parseOsc7Payload() / parseOsc7337Payload() — validate all inbound OSC payloads before they enter app state. Single audit entry point for OSC 6800, OSC 7, and OSC 7337.
 │   │   └── sessionPayload.test.ts
@@ -28,9 +28,8 @@ ai-dungeon/
 │       │   ├── index.ts              # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — renders one CardPanel per card; threads sessionContext + shellContext callbacks to NavBar
-│           ├── CardPanel.tsx          # Per-card panel component: hosts useDungeonSidecar and renders the Terminal inside a Tabs.Panel
-│           ├── NavBar.tsx             # Sidebar — passes per-card sessionContext and shellContext to each SessionCard
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal>, dungeon cards render a placeholder; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
+│           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext and shellContext to each SessionCard
 │           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
 │           ├── sessionContext.mock.ts  # Deterministic mock SessionContext fixtures keyed by card id

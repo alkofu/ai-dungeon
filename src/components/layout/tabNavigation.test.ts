@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
+import type { Card } from "../../types/card";
 import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
 
-const A = { id: "A" };
-const B = { id: "B" };
-const C = { id: "C" };
+const A: Card = { id: "A", type: "terminal" };
+const B: Card = { id: "B", type: "terminal" };
+const C: Card = { id: "C", type: "terminal" };
 
 describe("getCycleTargetId", () => {
   it("returns null for empty cards array", () => {
@@ -59,22 +60,28 @@ describe("getNumericTargetId", () => {
   });
 
   it("returns ninth card at position 9 with nine cards", () => {
-    const nineCards = [
-      { id: "1" },
-      { id: "2" },
-      { id: "3" },
-      { id: "4" },
-      { id: "5" },
-      { id: "6" },
-      { id: "7" },
-      { id: "8" },
-      { id: "9" },
+    const nineCards: Card[] = [
+      { id: "1", type: "terminal" },
+      { id: "2", type: "terminal" },
+      { id: "3", type: "terminal" },
+      { id: "4", type: "terminal" },
+      { id: "5", type: "terminal" },
+      { id: "6", type: "terminal" },
+      { id: "7", type: "terminal" },
+      { id: "8", type: "terminal" },
+      { id: "9", type: "terminal" },
     ];
     expect(getNumericTargetId(nineCards, 9)).toBe("9");
   });
 
   it("returns null at position 9 with only five cards", () => {
-    const fiveCards = [{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }, { id: "5" }];
+    const fiveCards: Card[] = [
+      { id: "1", type: "terminal" },
+      { id: "2", type: "terminal" },
+      { id: "3", type: "terminal" },
+      { id: "4", type: "terminal" },
+      { id: "5", type: "terminal" },
+    ];
     expect(getNumericTargetId(fiveCards, 9)).toBeNull();
   });
 });

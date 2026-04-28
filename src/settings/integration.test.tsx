@@ -100,7 +100,8 @@ function renderIntegration() {
       <MantineThemeBridge>
         <AppLayout
           cards={[]}
-          onAddCard={vi.fn()}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
           onRemoveCard={vi.fn()}
           activeId={null}
           onActiveIdChange={vi.fn()}

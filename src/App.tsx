@@ -1,6 +1,6 @@
 import { useCallback, useReducer } from "react";
 import { AppLayout } from "./components/layout";
-import type { Card } from "./types/card";
+import type { Card, CardType } from "./types/card";
 import type { SessionContext, ShellContext } from "./types/session";
 
 // ── State shape ───────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ export interface AppState {
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 type AppAction =
-  | { type: "add" }
+  | { type: "add"; cardType: CardType }
   | { type: "remove"; id: string }
   | { type: "activate"; id: string | null }
   | { type: "setSessionContext"; id: string; ctx: SessionContext }
@@ -26,7 +26,7 @@ type AppAction =
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "add": {
-      const newCard: Card = { id: globalThis.crypto.randomUUID() };
+      const newCard: Card = { id: globalThis.crypto.randomUUID(), type: action.cardType };
       return {
         // The new card is appended to the end of the list.
         cards: [...state.cards, newCard],
@@ -107,8 +107,12 @@ const initialState: AppState = { cards: [], activeId: null, sessionContext: {}, 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
-  const addCard = useCallback(() => {
-    dispatch({ type: "add" });
+  const addTerminalCard = useCallback(() => {
+    dispatch({ type: "add", cardType: "terminal" });
+  }, []);
+
+  const addDungeonCard = useCallback(() => {
+    dispatch({ type: "add", cardType: "dungeon" });
   }, []);
 
   const removeCard = useCallback((id: string) => {
@@ -134,7 +138,8 @@ export function App() {
       cards={state.cards}
       activeId={state.activeId}
       onActiveIdChange={setActiveId}
-      onAddCard={addCard}
+      onAddTerminalCard={addTerminalCard}
+      onAddDungeonCard={addDungeonCard}
       onRemoveCard={removeCard}
       sessionContext={state.sessionContext}
       onSessionContextChange={setSessionContext}
