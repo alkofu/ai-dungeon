@@ -2,6 +2,8 @@
 
 ```
 ai-dungeon/
+├── python/
+│   └── sidecar.py        # Hello-world Python sidecar: prints a startup line then sleeps. Spawned by the Rust backend on the first card open; killed on the last card close. Dev-mode only — no production bundling.
 ├── public/
 │   └── fonts/            # Vendored MesloLGS NF TTF faces (see MesloLGS NF section below)
 │       ├── MesloLGS NF Regular.ttf
@@ -15,17 +17,19 @@ ai-dungeon/
 │   │   └── fonts.css # @font-face declarations for MesloLGS NF (all four faces)
 │   ├── App.tsx       # Root component — useReducer for cards + activeId; owns tab state
 │   ├── types/
-│   │   ├── card.ts               # Card type ({ id: string })
+│   │   ├── card.ts               # Card type ({ id: string }) + isDungeonCard() predicate
 │   │   ├── session.ts            # SessionContext (OSC 6800) and ShellContext (OSC 7/7337) interfaces; all values are UNTRUSTED. branch and repo are optional on both types (cleared by empty OSC 7337).
 │   │   ├── sessionPayload.ts     # parseSessionContextPayload() / parseOsc7Payload() / parseOsc7337Payload() — validate all inbound OSC payloads before they enter app state. Single audit entry point for OSC 6800, OSC 7, and OSC 7337.
 │   │   └── sessionPayload.test.ts
 │   └── components/
 │       ├── Terminal/
-│       │   ├── Terminal.tsx   # xterm.js wrapper — accepts sessionId prop; OSC 6800, OSC 7, and OSC 7337 handlers; PTY IPC, FitAddon, WebFontsAddon, base64 I/O; module-level per-sid spawn-chain serialises pty_spawn/pty_kill to prevent StrictMode remount races; awaits loadFonts() before term.open()
-│       │   ├── index.ts       # Barrel export
+│       │   ├── Terminal.tsx          # xterm.js wrapper — accepts sessionId prop; OSC 6800, OSC 7, and OSC 7337 handlers; PTY IPC, FitAddon, WebFontsAddon, base64 I/O; module-level per-sid spawn-chain serialises pty_spawn/pty_kill to prevent StrictMode remount races; awaits loadFonts() before term.open()
+│       │   ├── useDungeonSidecar.ts  # Hook: calls dungeon_open on mount and dungeon_close on unmount; promise-chain serialisation prevents StrictMode close-before-open races
+│       │   ├── index.ts              # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — threads sessionContext + shellContext + their change callbacks to NavBar and Terminal
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — renders one CardPanel per card; threads sessionContext + shellContext callbacks to NavBar
+│           ├── CardPanel.tsx          # Per-card panel component: hosts useDungeonSidecar and renders the Terminal inside a Tabs.Panel
 │           ├── NavBar.tsx             # Sidebar — passes per-card sessionContext and shellContext to each SessionCard
 │           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
@@ -35,7 +39,8 @@ ai-dungeon/
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point
 │   │   ├── lib.rs    # Library crate (command handlers)
-│   │   └── pty.rs    # PTY session management (spawn/write/resize/kill commands); generation tokens + duplicate-ID rejection prevent orphaned sessions on rapid remount; exports TERM_PROGRAM=ai-dungeon for child-process self-identification; exports LC_ALL with UTF-8 locale on Unix; bash/zsh sessions additionally receive `__ai_dungeon_emit_ctx` via per-session shell-startup-file injection (ZDOTDIR override for zsh, --rcfile for bash) so the hook is wired before ZLE binds the keyboard
+│   │   ├── pty.rs    # PTY session management (spawn/write/resize/kill commands); generation tokens + duplicate-ID rejection prevent orphaned sessions on rapid remount; exports TERM_PROGRAM=ai-dungeon for child-process self-identification; exports LC_ALL with UTF-8 locale on Unix; bash/zsh sessions additionally receive `__ai_dungeon_emit_ctx` via per-session shell-startup-file injection (ZDOTDIR override for zsh, --rcfile for bash) so the hook is wired before ZLE binds the keyboard
+│   │   └── dungeon.rs  # Python sidecar lifecycle — DungeonState (Mutex-protected counter + Child slot), dungeon_open / dungeon_close Tauri commands, testable inner functions
 │   ├── capabilities/ # Tauri permission grants
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
@@ -81,6 +86,47 @@ imperfectly in browser-based terminals due to upstream xterm.js limitations
 unrelated to font loading. See the xterm.js issue tracker for the current status.
 
 For historical context and the full design rationale, see issue #32.
+
+## Python Sidecar Lifecycle
+
+A single Python sidecar process (`python/sidecar.py`) is spawned when the first session card opens and killed when the last card closes. The sidecar is a process-wide singleton: opening additional cards never spawns more than one process, and closing some-but-not-all cards leaves it running.
+
+### Why a reference-counted singleton?
+
+Dungeon cards will eventually be backed by a long-running Python process. Tying the sidecar lifetime to "any card is open" is the minimal, verifiable foundation: it proves the spawn/kill path end-to-end before IPC or real functionality is added. A reference-counted design means the resource is held exactly as long as it is needed, and the lifecycle is symmetric — every `open` is paired with a `close`.
+
+### Rust layer (`src-tauri/src/dungeon.rs`)
+
+`DungeonState` holds a `Mutex<DungeonInner>` containing an `open_count: u32` and an `Option<Child>`. Two Tauri commands drive it:
+
+- `dungeon_open` — increments `open_count`. On the 0 → 1 transition, spawns `python3 python/sidecar.py` — but only in debug builds (`#[cfg(debug_assertions)]`). Release builds skip the spawn and emit a log line instead. The count is incremented even when spawn fails, preserving the open/close symmetry: a subsequent `dungeon_close` will decrement cleanly without underflowing.
+- `dungeon_close` — decrements `open_count`. On the N → 1 → 0 transition, takes the `Child` out of the slot, calls `kill()`, and calls `wait()` to reap the process and avoid zombies on Unix. Calling `dungeon_close` when `open_count` is already 0 is a no-op with a logged warning.
+
+The script path is resolved at compile time via `env!("CARGO_MANIFEST_DIR")` joined with `../python/sidecar.py`, so `cargo tauri dev` works on a fresh checkout without configuration. Spawn failures surface as `eprintln!` log lines; they do not return an error to the frontend and do not block card creation.
+
+The inner logic is split into `dungeon_open_with_spawner` and `dungeon_close_inner` (functions that accept a `spawner` closure and a `&mut DungeonInner` respectively) so unit tests can inject a fast-exiting `/bin/sh -c "sleep 1"` child instead of requiring Python on CI.
+
+### Frontend layer
+
+**`src/types/card.ts` — `isDungeonCard(card)`**
+
+The single predicate that decides whether a card participates in the sidecar lifecycle. Today it returns `true` for every card. When a `Card.type` field lands, this becomes `card.type === "dungeon"` — a one-line edit. The predicate must not be inlined at call sites; all consumers import it by name.
+
+**`src/components/Terminal/useDungeonSidecar.ts`**
+
+React hook mounted once per card (from `CardPanel`). On mount it calls `dungeon_open`; its cleanup calls `dungeon_close`. Both calls are chained on a `chainRef` promise so that React 19 StrictMode's rapid mount → unmount → remount sequence always delivers open before close at the Rust backend — the same serialisation pattern used by `Terminal.tsx` for `pty_spawn`/`pty_kill`. Invoke rejections are caught and logged to `console.warn`; they do not throw inside the effect.
+
+**`src/components/layout/CardPanel.tsx`**
+
+Thin per-card component extracted from `AppLayout`. Hosts `useDungeonSidecar` (hooks cannot be called inside `Array.map`) and renders the `Terminal` inside its `Tabs.Panel`. `AppLayout` maps `cards` to `<CardPanel>` elements.
+
+### Constraints and non-goals (v1)
+
+- No IPC between Rust and the Python process (no stdin pipe, no port, no message bus).
+- No user-visible UI for sidecar state (failures go to `eprintln!` only).
+- Debug builds only — the spawn call is gated on `#[cfg(debug_assertions)]`. Release builds log a message and skip spawn entirely. The script path uses a compile-time `CARGO_MANIFEST_DIR` reference that only works in dev mode.
+- `python3`-only — there is no `python` fallback. The interpreter must be on `PATH` as `python3`.
+- Crash recovery is out of scope: if the sidecar dies while cards are open, the stale `Child` handle remains until the last card closes, at which point `kill()` is called (idempotent) and a fresh process is spawned on the next 0 → 1 transition.
 
 ## OSC Session-Context Flow (6800 / 7 / 7337)
 
