@@ -1,3 +1,4 @@
+#![deny(unused)]
 mod dungeon;
 mod pty;
 

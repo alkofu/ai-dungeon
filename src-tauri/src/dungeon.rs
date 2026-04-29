@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+#[derive(Default)]
 pub struct DungeonInner {
     /// Number of cards that have called dungeon_open without a matching dungeon_close.
     pub open_count: u32,
@@ -16,15 +17,6 @@ pub struct DungeonInner {
 #[derive(Default)]
 pub struct DungeonState {
     inner: Mutex<DungeonInner>,
-}
-
-impl Default for DungeonInner {
-    fn default() -> Self {
-        DungeonInner {
-            open_count: 0,
-            child: None,
-        }
-    }
 }
 
 // ── Path resolution ───────────────────────────────────────────────────────────
@@ -61,7 +53,7 @@ fn spawn_sidecar() -> Result<Child, String> {
 /// dungeon_close will skip the kill+wait step cleanly.
 pub(crate) fn dungeon_open_with_spawner<F>(
     inner: &mut DungeonInner,
-    spawner: F,
+    _spawner: F,
 ) -> Result<(), String>
 where
     F: FnOnce() -> Result<Child, String>,
@@ -71,7 +63,7 @@ where
     if inner.open_count == 1 {
         // First card: spawn the sidecar (debug builds only).
         #[cfg(debug_assertions)]
-        match spawner() {
+        match _spawner() {
             Ok(child) => {
                 inner.child = Some(child);
             }
@@ -213,11 +205,17 @@ mod tests {
 
         dungeon_close_inner(&mut inner).expect("close 1");
         assert_eq!(inner.open_count, 2, "count must be 2 after one close");
-        assert!(inner.child.is_some(), "child must still be alive at count=2");
+        assert!(
+            inner.child.is_some(),
+            "child must still be alive at count=2"
+        );
 
         dungeon_close_inner(&mut inner).expect("close 2");
         assert_eq!(inner.open_count, 1, "count must be 1 after two closes");
-        assert!(inner.child.is_some(), "child must still be alive at count=1");
+        assert!(
+            inner.child.is_some(),
+            "child must still be alive at count=1"
+        );
 
         dungeon_close_inner(&mut inner).expect("close 3");
         assert_eq!(inner.open_count, 0, "count must be 0 after three closes");
@@ -243,9 +241,18 @@ mod tests {
         let mut inner = DungeonInner::default();
 
         let result = dungeon_open_with_spawner(&mut inner, err_spawner);
-        assert!(result.is_ok(), "open must return Ok even when spawner fails");
-        assert_eq!(inner.open_count, 1, "count must be 1 even after spawn failure");
-        assert!(inner.child.is_none(), "child must be None after spawn failure");
+        assert!(
+            result.is_ok(),
+            "open must return Ok even when spawner fails"
+        );
+        assert_eq!(
+            inner.open_count, 1,
+            "count must be 1 even after spawn failure"
+        );
+        assert!(
+            inner.child.is_none(),
+            "child must be None after spawn failure"
+        );
 
         // close (1→0): must succeed without panic even with child=None
         let close_result = dungeon_close_inner(&mut inner);
