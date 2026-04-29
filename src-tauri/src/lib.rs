@@ -15,6 +15,7 @@ pub fn run() {
             pty::pty_kill,
             dungeon::dungeon_open,
             dungeon::dungeon_close,
+            dungeon::dungeon_send,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

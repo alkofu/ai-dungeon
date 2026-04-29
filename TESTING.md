@@ -2,21 +2,23 @@
 
 ## Testing Architecture
 
-ai-dungeon uses three testing layers:
+ai-dungeon uses four testing layers:
 
 1. **Unit and component tests** — Vitest + React Testing Library, covering individual React components and utilities in isolation using a jsdom DOM environment.
 2. **End-to-end tests** — Playwright, covering full user flows in a real Chromium browser against the running Vite dev server.
-3. **Rust tests** — `cargo test` unit tests covering PTY session management and locale resolution. See the Rust Tests section below.
+3. **Rust tests** — `cargo test` unit tests covering PTY session management, locale resolution, and dungeon sidecar IPC. See the Rust Tests section below.
+4. **Python tests** — pytest covering the sidecar wire protocol. Run with `python -m pytest python/test_sidecar.py` from the repo root.
 
 ## Quick Reference
 
-| Command           | Description                       |
-| ----------------- | --------------------------------- |
-| `pnpm test`       | Run all unit/component tests once |
-| `pnpm test:watch` | Run tests in watch mode           |
-| `pnpm test:ui`    | Open Vitest browser UI            |
-| `pnpm coverage`   | Run tests with V8 coverage report |
-| `pnpm test:e2e`   | Run Playwright E2E tests          |
+| Command                                   | Description                       |
+| ----------------------------------------- | --------------------------------- |
+| `pnpm test`                               | Run all unit/component tests once |
+| `pnpm test:watch`                         | Run tests in watch mode           |
+| `pnpm test:ui`                            | Open Vitest browser UI            |
+| `pnpm coverage`                           | Run tests with V8 coverage report |
+| `pnpm test:e2e`                           | Run Playwright E2E tests          |
+| `python -m pytest python/test_sidecar.py` | Run Python sidecar tests          |
 
 ## Unit and Component Tests (Vitest)
 
@@ -148,6 +150,18 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 7. **Hook removal resilience** — In a single session, run `unset PROMPT_COMMAND; precmd_functions=()` (or the equivalent for your shell) to disable the hook. Confirm the status bar stops updating but does not crash. Close and reopen the card — confirm the hook is re-injected on the new PTY and the status bar starts updating again.
 8. **Unborn-HEAD repository** — Run `mkdir /tmp/newrepo && cd /tmp/newrepo && git init`. Open a new card and navigate to that directory (`cd /tmp/newrepo`). Press Enter to trigger a prompt. Confirm the card shows no branch and no repo name (no stale git data). Then run `git commit --allow-empty -m init` and press Enter again. Confirm the branch (`main` or `master`, depending on your git default) now appears on the card.
 
+## Dungeon Hi / Clean IPC verification
+
+After `pnpm tauri dev` opens the app window, perform the following checks to confirm the end-to-end sidecar IPC is working.
+
+1. **Sidecar startup banner** — Open the Tauri dev console (or the terminal running `pnpm tauri dev`). Add a Dungeon card. Confirm `[ai-dungeon-sidecar] hello, world` appears on stderr shortly after the card mounts.
+2. **Hi button round-trip** — In the Dungeon card panel, click the **Hi** button. Confirm a reply string (e.g. `Hello`) appears below the buttons within a second. No error text should be visible.
+3. **Multiple Hi clicks** — Click Hi several more times. Confirm each click replaces the previous reply with a fresh one and no error is shown.
+4. **Clean button** — After receiving a reply, click **Clean**. Confirm both the reply text and any error text disappear, returning the panel to its initial state.
+5. **Error display on sidecar not running** — With no Dungeon card open, the sidecar is not running. The Hi button only appears when a Dungeon card is mounted (and the sidecar is therefore live), so this scenario is normally unreachable via the UI. If you manually call `dungeon_send` via DevTools while no card is open, confirm the error text `sidecar not running` appears in red.
+6. **Sidecar shutdown on card close** — Add a Dungeon card, click Hi to confirm IPC is live, then close the card (`×`). Confirm the `python3 sidecar.py` process is no longer visible in `ps aux | grep sidecar.py`.
+7. **Multiple Dungeon cards — single sidecar** — Add two Dungeon cards. Click Hi in each. Confirm both receive replies. Close one card. Confirm the sidecar process is still running (the remaining card holds the reference count). Close the second card. Confirm the process exits.
+
 ## Rust Tests
 
 The Rust backend (`src-tauri/`) is tested with standard `#[cfg(test)]` modules and `cargo test`.
@@ -185,3 +199,15 @@ The unit tests cover the session map/generation layer, the UTF-8 locale resolver
 | `shell_init_polyglot_emits_cleared_osc_7337_when_branch_is_empty` | In a fresh `git init` repo with no commits (unborn HEAD), the polyglot emits a cleared OSC 7337 (`\x1b]7337;\x1b\\`) instead of a tab-delimited payload with an empty branch field     |
 | `shell_init_polyglot_emits_osc7_only_once_when_cwd_is_unchanged`  | Calling `__ai_dungeon_emit_ctx` twice in the same directory emits OSC 7 exactly once (CWD-change debounce via `__ai_dungeon_last_cwd`)                                                 |
 | `shell_init_polyglot_re_emits_osc7_after_cd`                      | After a `cd` between two prompt cycles, OSC 7 is emitted exactly twice (once per distinct CWD) and OSC 7337 is emitted exactly twice (once per prompt, no debounce)                    |
+| `open_then_close_spawns_and_kills_child`                          | `dungeon_open_with_spawner` sets `child = Some` and increments count; `dungeon_close_inner` sets `child = None` and decrements count to 0                                              |
+| `second_open_does_not_spawn`                                      | A second `dungeon_open` call does not invoke the spawner; `open_count` reaches 2 with exactly one child process                                                                        |
+| `close_with_other_cards_open_does_not_kill`                       | `dungeon_close_inner` decrements count but leaves the child alive while `open_count > 0`; child is taken on the final close                                                            |
+| `close_when_count_is_zero_is_noop`                                | `dungeon_close_inner` with `open_count == 0` returns `Ok` and leaves state unchanged                                                                                                   |
+| `spawn_failure_still_increments_count`                            | A failing spawner still increments `open_count`; subsequent `dungeon_close` decrements cleanly without underflow                                                                       |
+| `open_attaches_stdin_and_pending_starts_empty`                    | After `dungeon_open`, `stdin` is `Some` and `pending` map is empty; after `dungeon_close`, `stdin` is `None`                                                                           |
+| `reader_thread_routes_reply_by_id`                                | `spawn_reader_thread` reads a `{"id":…,"reply":…}` JSON line from a subprocess stdout and delivers `reply` to the pre-registered `SyncSender` for that id                              |
+| `dungeon_send_inner_returns_reply_for_matching_id`                | `dungeon_send_inner_blocking` writes the correct JSON request line and returns the reply when a background thread delivers it via the pending channel                                  |
+| `dungeon_send_inner_times_out_when_no_reply_arrives`              | `dungeon_send_inner_blocking` returns `Err("sidecar reply timeout")` and cleans up pending when no reply arrives within the timeout                                                    |
+| `dungeon_send_returns_err_when_stdin_is_none`                     | The `dungeon_send` early-return guard returns `Err("sidecar not running")` when `stdin` is `None`                                                                                      |
+| `dungeon_send_returns_err_when_sidecar_exited`                    | The `try_wait()` liveness check returns `Err("sidecar process exited")` immediately when the child process has already exited, without waiting for the reply timeout                   |
+| `dungeon_send_inner_returns_disconnected_when_pending_drained`    | If the close path drains `pending` while `dungeon_send_inner_blocking` is waiting, the function returns `Err("sidecar reply channel closed")`                                          |

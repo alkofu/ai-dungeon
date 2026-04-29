@@ -9,6 +9,7 @@ import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
 import { SettingsModal } from "../settings";
+import { DungeonPanel } from "./DungeonPanel";
 
 function assertNever(x: never): React.ReactNode {
   console.error(`Unexpected card type: ${String(x)}`);
@@ -184,9 +185,7 @@ export function AppLayout({
                     onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
                   />
                 ) : card.type === "dungeon" ? (
-                  <Text data-testid={`dungeon-placeholder-${card.id}`} c="dimmed">
-                    Dungeon: under construction
-                  </Text>
+                  <DungeonPanel card={card} />
                 ) : (
                   assertNever(card.type)
                 )}
