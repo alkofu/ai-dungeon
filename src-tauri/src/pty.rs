@@ -943,7 +943,9 @@ mod tests {
         // Cleared OSC 7337 must be present
         let cleared_needle: &[u8] = b"\x1b]7337;\x1b\\";
         assert!(
-            stdout.windows(cleared_needle.len()).any(|w| w == cleared_needle),
+            stdout
+                .windows(cleared_needle.len())
+                .any(|w| w == cleared_needle),
             "expected cleared OSC 7337 in stdout, got: {:?}",
             String::from_utf8_lossy(&stdout),
         );
@@ -956,7 +958,7 @@ mod tests {
                 if let Some(esc_idx) = after_open.iter().position(|&b| b == 0x1b) {
                     let payload = &after_open[..esc_idx];
                     assert!(
-                        !(!payload.is_empty() && payload.ends_with(b"\t")),
+                        payload.is_empty() || !payload.ends_with(b"\t"),
                         "tab-delimited OSC 7337 with empty branch must not appear, got: {:?}",
                         String::from_utf8_lossy(&stdout),
                     );
@@ -977,12 +979,13 @@ mod tests {
     #[serial]
     fn shell_init_polyglot_emits_osc7_only_once_when_cwd_is_unchanged() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let stdout = capture_polyglot_output(
-            tmp.path(),
-            "__ai_dungeon_emit_ctx; __ai_dungeon_emit_ctx",
-        );
+        let stdout =
+            capture_polyglot_output(tmp.path(), "__ai_dungeon_emit_ctx; __ai_dungeon_emit_ctx");
         let needle = b"\x1b]7;file://";
-        let count = stdout.windows(needle.len()).filter(|w| *w == needle).count();
+        let count = stdout
+            .windows(needle.len())
+            .filter(|w| *w == needle)
+            .count();
         assert_eq!(
             count, 1,
             "expected exactly 1 OSC 7 emission across two prompts in same CWD, got {count}; stdout: {:?}",
@@ -1006,7 +1009,10 @@ mod tests {
         );
         let stdout = capture_polyglot_output(tmp.path(), &cmd);
         let needle = b"\x1b]7;file://";
-        let count = stdout.windows(needle.len()).filter(|w| *w == needle).count();
+        let count = stdout
+            .windows(needle.len())
+            .filter(|w| *w == needle)
+            .count();
         assert_eq!(
             count, 2,
             "expected exactly 2 OSC 7 emissions across two prompts with cd between, got {count}; stdout: {:?}",
@@ -1014,8 +1020,14 @@ mod tests {
         );
         // Also verify OSC 7337 still fires on every prompt (cadence unchanged)
         let osc7337_needle = b"\x1b]7337;";
-        let osc7337_count = stdout.windows(osc7337_needle.len()).filter(|w| *w == osc7337_needle).count();
-        assert_eq!(osc7337_count, 2, "expected OSC 7337 on every prompt regardless of CWD");
+        let osc7337_count = stdout
+            .windows(osc7337_needle.len())
+            .filter(|w| *w == osc7337_needle)
+            .count();
+        assert_eq!(
+            osc7337_count, 2,
+            "expected OSC 7337 on every prompt regardless of CWD"
+        );
     }
 
     /// `try_reserve_session_id` must return `Ok(1)` on the first call, then
