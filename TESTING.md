@@ -115,10 +115,10 @@ After `pnpm tauri dev` opens the app window, perform the following checks to con
 
 `.github/workflows/test.yml` defines three parallel jobs that run on every pull request and push to `main`:
 
-| Job     | What it runs                                                                                                                                                   |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `check` | `pnpm lint`, `pnpm format:check`, `pnpm test` — lint, format, and unit/component tests                                                                         |
-| `e2e`   | `pnpm exec playwright install --with-deps chromium` then `pnpm exec playwright test` — Playwright specs against the Vite dev server (no Tauri binary required) |
+| Job     | What it runs                                                                                                                                                                                             |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check` | `pnpm lint`, `pnpm format:check`, `pnpm test` — lint, format, and unit/component tests                                                                                                                   |
+| `e2e`   | `pnpm exec playwright install --with-deps chromium` then `pnpm exec playwright test` — Playwright specs against the Vite dev server (no Tauri binary required)                                           |
 | `rust`  | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` and `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` — Clippy violations and formatting drift fail the build |
 
 The `e2e` job runs the Vite frontend only; the `playwright.config.ts` `webServer` block starts `pnpm dev` automatically, so no native system dependencies beyond Node.js and Chromium are needed on the runner.
