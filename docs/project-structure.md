@@ -3,7 +3,8 @@
 ```
 ai-dungeon/
 ├── python/
-│   └── sidecar.py        # Hello-world Python sidecar: prints a startup line then sleeps. Spawned by the Rust backend on the first card open; killed on the last card close. Dev-mode only — no production bundling.
+│   ├── sidecar.py        # Python sidecar: reads line-delimited JSON from stdin, replies with {"id": ..., "reply": "Hello"} on stdout. Spawned by the Rust backend on the first dungeon card open; killed on the last close. Dev-mode only — no production bundling.
+│   └── test_sidecar.py   # pytest suite for sidecar.py wire-protocol behaviour.
 ├── public/
 │   └── fonts/            # Vendored MesloLGS NF TTF faces (see MesloLGS NF section below)
 │       ├── MesloLGS NF Regular.ttf
@@ -25,10 +26,14 @@ ai-dungeon/
 │       ├── Terminal/
 │       │   ├── Terminal.tsx          # xterm.js wrapper — accepts sessionId prop; OSC 6800, OSC 7, and OSC 7337 handlers; PTY IPC, FitAddon, WebFontsAddon, base64 I/O; module-level per-sid spawn-chain serialises pty_spawn/pty_kill to prevent StrictMode remount races; awaits loadFonts() before term.open()
 │       │   ├── useDungeonSidecar.ts  # Hook: calls dungeon_open on mount and dungeon_close on unmount; promise-chain serialisation prevents StrictMode close-before-open races
+│       │   ├── useDungeonSend.ts     # Hook: exposes sendHi() — invokes the dungeon_send Tauri command with msg="Hi" and returns the sidecar reply string
+│       │   ├── useDungeonSend.test.ts
 │       │   ├── index.ts              # Barrel export
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal>, dungeon cards render a placeholder; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal>, dungeon cards render <DungeonPanel>; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
+│           ├── DungeonPanel.tsx       # Dungeon card panel — mounts useDungeonSidecar and useDungeonSend; renders Hi / Clean buttons; displays sidecar reply or error text
+│           ├── DungeonPanel.test.tsx
 │           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext and shellContext to each SessionCard
 │           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
@@ -39,7 +44,7 @@ ai-dungeon/
 │   │   ├── main.rs   # Binary entry point
 │   │   ├── lib.rs    # Library crate (command handlers)
 │   │   ├── pty.rs    # PTY session management (spawn/write/resize/kill commands); generation tokens + duplicate-ID rejection prevent orphaned sessions on rapid remount; exports TERM_PROGRAM=ai-dungeon for child-process self-identification; exports LC_ALL with UTF-8 locale on Unix; bash/zsh sessions additionally receive `__ai_dungeon_emit_ctx` via per-session shell-startup-file injection (ZDOTDIR override for zsh, --rcfile for bash) so the hook is wired before ZLE binds the keyboard
-│   │   └── dungeon.rs  # Python sidecar lifecycle — DungeonState (Mutex-protected counter + Child slot), dungeon_open / dungeon_close Tauri commands, testable inner functions
+│   │   └── dungeon.rs  # Python sidecar lifecycle — DungeonState (Arc<Mutex<DungeonInner>>), dungeon_open / dungeon_close / dungeon_send Tauri commands; reader thread routes sidecar stdout to per-request reply channels; testable inner functions
 │   ├── capabilities/ # Tauri permission grants
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
@@ -88,44 +93,64 @@ For historical context and the full design rationale, see issue #32.
 
 ## Python Sidecar Lifecycle
 
-A single Python sidecar process (`python/sidecar.py`) is spawned when the first session card opens and killed when the last card closes. The sidecar is a process-wide singleton: opening additional cards never spawns more than one process, and closing some-but-not-all cards leaves it running.
+A single Python sidecar process (`python/sidecar.py`) is spawned when the first dungeon card opens and killed when the last dungeon card closes. The sidecar is a process-wide singleton: opening additional dungeon cards never spawns more than one process, and closing some-but-not-all cards leaves it running.
 
 ### Why a reference-counted singleton?
 
-Dungeon cards will eventually be backed by a long-running Python process. Tying the sidecar lifetime to "any card is open" is the minimal, verifiable foundation: it proves the spawn/kill path end-to-end before IPC or real functionality is added. A reference-counted design means the resource is held exactly as long as it is needed, and the lifecycle is symmetric — every `open` is paired with a `close`.
+Dungeon cards share one long-running Python process. Tying the sidecar lifetime to "any dungeon card is open" keeps the resource alive exactly as long as it is needed without spawning duplicate processes. A reference-counted design also enforces symmetry — every `dungeon_open` call is paired with exactly one `dungeon_close`, which prevents counter underflow and ensures the child is reaped on the final close.
 
 ### Rust layer (`src-tauri/src/dungeon.rs`)
 
-`DungeonState` holds a `Mutex<DungeonInner>` containing an `open_count: u32` and an `Option<Child>`. Two Tauri commands drive it:
+`DungeonState` wraps `DungeonInner` in an `Arc<Mutex<...>>` so it can be cloned into `spawn_blocking` closures. `DungeonInner` holds:
 
-- `dungeon_open` — increments `open_count`. On the 0 → 1 transition, spawns `python3 python/sidecar.py` — but only in debug builds (`#[cfg(debug_assertions)]`). Release builds skip the spawn and emit a log line instead. The count is incremented even when spawn fails, preserving the open/close symmetry: a subsequent `dungeon_close` will decrement cleanly without underflowing.
-- `dungeon_close` — decrements `open_count`. On the N → 1 → 0 transition, takes the `Child` out of the slot, calls `kill()`, and calls `wait()` to reap the process and avoid zombies on Unix. Calling `dungeon_close` when `open_count` is already 0 is a no-op with a logged warning.
+- `open_count: u32` — reference count of mounted dungeon cards.
+- `child: Option<Child>` — the running sidecar process handle.
+- `stdin: Option<ChildStdin>` — write end of the sidecar's stdin pipe; `None` when not running.
+- `pending: Arc<Mutex<HashMap<String, SyncSender<String>>>>` — registry mapping request `id` to per-request reply channels; shared with the reader thread.
+- `next_request_id: u64` — monotonic counter for generating unique request IDs.
 
-The script path is resolved at compile time via `env!("CARGO_MANIFEST_DIR")` joined with `../python/sidecar.py`, so `cargo tauri dev` works on a fresh checkout without configuration. Spawn failures surface as `eprintln!` log lines; they do not return an error to the frontend and do not block card creation.
+Three Tauri commands drive the state:
 
-The inner logic is split into `dungeon_open_with_spawner` and `dungeon_close_inner` (functions that accept a `spawner` closure and a `&mut DungeonInner` respectively) so unit tests can inject a fast-exiting `/bin/sh -c "sleep 1"` child instead of requiring Python on CI.
+- `dungeon_open` — increments `open_count`. On the 0 → 1 transition, spawns `python3 python/sidecar.py` with piped stdin/stdout (debug builds only; release builds log and skip), stores the stdin handle, and starts the reader thread. The count is incremented even when spawn fails, preserving open/close symmetry.
+- `dungeon_close` — decrements `open_count`. On the N → 0 transition: drops `stdin` (triggers sidecar EOF exit), drains `pending` (causes in-flight `dungeon_send` calls to resolve with a "channel closed" error), then kills and waits on the child process to avoid Unix zombies.
+- `dungeon_send` — sends a JSON message to the sidecar and awaits the reply. Implemented via `spawn_blocking`: generates a unique request ID, inserts a `SyncSender` into `pending`, writes `{"id": "...", "msg": "..."}` as a newline-delimited JSON line to stdin, and blocks on a `recv_timeout` (5 s). The reader thread delivers the reply by `id`.
+
+The **reader thread** (`spawn_reader_thread`) runs for the lifetime of the sidecar process. It reads newline-delimited JSON from the sidecar's stdout, extracts `id` and `reply` fields, looks up the matching `SyncSender` in `pending`, removes it, and sends the reply string. Parse errors and unknown IDs are logged to stderr and skipped; the thread exits when stdout closes.
+
+The script path is resolved at compile time via `env!("CARGO_MANIFEST_DIR")` joined with `../python/sidecar.py`, so `cargo tauri dev` works on a fresh checkout without configuration. Spawn failures surface as `eprintln!` log lines and do not block card creation.
+
+The inner logic is split into `dungeon_open_with_spawner` (accepts an `Option<R>` reader callback — `Some` in production, `None` in unit tests that do not need the reader thread), `dungeon_close_inner`, and `dungeon_send_inner_blocking` so unit tests can inject a fast-exiting `/bin/sh` child and a `Vec<u8>` writer instead of requiring Python or a real process on CI.
 
 ### Frontend layer
 
 **`src/types/card.ts` — `isDungeonCard(card)`**
 
-The single predicate that decides whether a card participates in the sidecar lifecycle. Today it returns `true` for every card. When a `Card.type` field lands, this becomes `card.type === "dungeon"` — a one-line edit. The predicate must not be inlined at call sites; all consumers import it by name.
+The single predicate that decides whether a card participates in the sidecar lifecycle. It returns `true` when `card.type === "dungeon"`. The predicate must not be inlined at call sites; all consumers import it by name.
 
 **`src/components/Terminal/useDungeonSidecar.ts`**
 
-React hook mounted once per card (from `CardPanel`). On mount it calls `dungeon_open`; its cleanup calls `dungeon_close`. Both calls are chained on a `chainRef` promise so that React 19 StrictMode's rapid mount → unmount → remount sequence always delivers open before close at the Rust backend — the same serialisation pattern used by `Terminal.tsx` for `pty_spawn`/`pty_kill`. Invoke rejections are caught and logged to `console.warn`; they do not throw inside the effect.
+React hook mounted once per dungeon card (from `DungeonPanel`). On mount it calls `dungeon_open`; its cleanup calls `dungeon_close`. Both calls are chained on a `chainRef` promise so that React 19 StrictMode's rapid mount → unmount → remount sequence always delivers open before close at the Rust backend — the same serialisation pattern used by `Terminal.tsx` for `pty_spawn`/`pty_kill`. Invoke rejections are caught and logged to `console.warn`; they do not throw inside the effect.
 
-**`src/components/layout/CardPanel.tsx`**
+**`src/components/Terminal/useDungeonSend.ts`**
 
-Thin per-card component extracted from `AppLayout`. Hosts `useDungeonSidecar` (hooks cannot be called inside `Array.map`) and renders the `Terminal` inside its `Tabs.Panel`. `AppLayout` maps `cards` to `<CardPanel>` elements.
+React hook that wraps the `dungeon_send` Tauri command. Exposes a single `sendHi()` callback that invokes `dungeon_send` with `msg: "Hi"` and returns the sidecar's reply string. The callback is stable across renders (`useCallback` with an empty dependency array).
 
-### Constraints and non-goals (v1)
+**`src/components/layout/DungeonPanel.tsx`**
 
-- No IPC between Rust and the Python process (no stdin pipe, no port, no message bus).
-- No user-visible UI for sidecar state (failures go to `eprintln!` only).
-- Debug builds only — the spawn call is gated on `#[cfg(debug_assertions)]`. Release builds log a message and skip spawn entirely. The script path uses a compile-time `CARGO_MANIFEST_DIR` reference that only works in dev mode.
-- `python3`-only — there is no `python` fallback. The interpreter must be on `PATH` as `python3`.
-- Crash recovery is out of scope: if the sidecar dies while cards are open, the stale `Child` handle remains until the last card closes, at which point `kill()` is called (idempotent) and a fresh process is spawned on the next 0 → 1 transition.
+Per-dungeon-card panel component. Mounts `useDungeonSidecar` (lifecycle) and `useDungeonSend` (IPC). Renders two buttons:
+
+- **Hi** — calls `sendHi()` and displays the sidecar reply string below the buttons, or an error message in red if the invoke rejects.
+- **Clean** — clears both the reply and error state, resetting the panel to its initial appearance.
+
+`AppLayout` renders `<DungeonPanel>` for cards with `type === "dungeon"`.
+
+### Constraints and non-goals (current iteration)
+
+- **IPC is line-delimited JSON over piped stdio only** — no TCP port, no Unix socket, no message bus. Concurrent `dungeon_send` calls are serialised through the `DungeonState` mutex (one in-flight request at a time). This is acceptable while there is a single dungeon card; a writer-actor pattern is the documented upgrade path for concurrent multi-card IPC.
+- **No user-visible UI for sidecar lifecycle state** — spawn failures and reader-thread errors surface as `eprintln!` log lines only. The Hi button error display covers `dungeon_send` rejections (e.g., timeout, sidecar not running) but not lifecycle errors.
+- **Debug builds only** — the spawn call is gated on `#[cfg(debug_assertions)]`. Release builds log a message and skip spawn entirely. The script path uses a compile-time `CARGO_MANIFEST_DIR` reference that only works in dev mode.
+- **`python3`-only** — there is no `python` fallback. The interpreter must be on `PATH` as `python3`.
+- **Crash recovery is out of scope** — if the sidecar dies while cards are open, the stale `Child` handle remains until the last card closes. `dungeon_send` calls a `child.try_wait()` liveness check before writing to stdin: if the process has already exited, it returns `Err("sidecar process exited")` immediately rather than waiting for the 5-second reply timeout. A fresh process is spawned on the next 0 → 1 transition.
 
 ## OSC Session-Context Flow (6800 / 7 / 7337)
 
