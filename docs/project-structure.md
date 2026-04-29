@@ -28,10 +28,10 @@ ai-dungeon/
 │       │   ├── useDungeonSidecar.ts  # Hook: calls dungeon_open on mount and dungeon_close on unmount; promise-chain serialisation prevents StrictMode close-before-open races
 │       │   ├── useDungeonSend.ts     # Hook: exposes sendHi() — invokes the dungeon_send Tauri command with msg="Hi" and returns the sidecar reply string
 │       │   ├── useDungeonSend.test.ts
-│       │   ├── index.ts              # Barrel export
+│       │   ├── index.ts              # React.lazy dynamic import boundary — re-exports Terminal via React.lazy() so the xterm payload (~349 KB) is split into an async chunk instead of the synchronous initial bundle. Consumers must wrap <Terminal> in a <Suspense> boundary.
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal>, dungeon cards render <DungeonPanel>; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal> (wrapped in Suspense with a full-size transparent div fallback), dungeon cards render <DungeonPanel>; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
 │           ├── DungeonPanel.tsx       # Dungeon card panel — mounts useDungeonSidecar and useDungeonSend; renders Hi / Clean buttons; displays sidecar reply or error text
 │           ├── DungeonPanel.test.tsx
 │           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext and shellContext to each SessionCard

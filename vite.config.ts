@@ -30,6 +30,16 @@ export default defineConfig({
     },
   },
 
+  build: {
+    // 600 kB (~30% above the current 456 KB synchronous initial chunk) is
+    // appropriate for a Tauri desktop app where the bundle is loaded from
+    // the embedded WebView's local filesystem. The default 500 kB threshold
+    // is calibrated for HTTP-delivered web apps. Raised to 600 kB to give
+    // headroom for incremental dependency growth while still catching
+    // meaningful regressions.
+    chunkSizeWarningLimit: 600,
+  },
+
   test: {
     environment: "jsdom",
     globals: true,

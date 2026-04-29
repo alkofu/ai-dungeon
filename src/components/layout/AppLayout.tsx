@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { ActionIcon, AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import { IconSettings } from "@tabler/icons-react";
@@ -179,11 +179,20 @@ export function AppLayout({
               // against a flex-column parent without an explicit definite height.
               <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
                 {card.type === "terminal" ? (
-                  <Terminal
-                    sessionId={card.id}
-                    onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
-                    onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
-                  />
+                  <Suspense
+                    fallback={
+                      <div
+                        data-testid="terminal-loading"
+                        style={{ width: "100%", height: "100%" }}
+                      />
+                    }
+                  >
+                    <Terminal
+                      sessionId={card.id}
+                      onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
+                      onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
+                    />
+                  </Suspense>
                 ) : card.type === "dungeon" ? (
                   <DungeonPanel card={card} />
                 ) : (

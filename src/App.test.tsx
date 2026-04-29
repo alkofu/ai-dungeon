@@ -13,6 +13,14 @@ import { Terminal } from "./components/Terminal/Terminal";
 let capturedOnSessionContextChange: ((ctx: SessionContext) => void) | undefined;
 let capturedOnShellContextChange: ((ctx: ShellContext) => void) | undefined;
 
+// Mock the lazy re-export (index.ts) with an eager pass-through so React.lazy
+// resolves synchronously in tests. The concrete Terminal module mock below
+// provides the actual implementation; this mock simply bypasses the lazy wrapper.
+vi.mock("./components/Terminal", async () => {
+  const mod = await import("./components/Terminal/Terminal");
+  return { Terminal: mod.Terminal };
+});
+
 vi.mock("./components/Terminal/Terminal", () => ({
   Terminal: vi.fn(
     (props: {
