@@ -58,6 +58,15 @@ interface TerminalProps {
   // Called whenever a ShellContext is assembled from OSC 7 / OSC 7337 payloads.
   // Fires with a fully-formed ShellContext (full replacement).
   onShellContextChange?: (ctx: ShellContext) => void;
+  // Called exactly once per live mount, immediately after `isReadyRef.current`
+  // is set to true (i.e. after `term.open()` has executed AND the spawn IIFE
+  // has finished subscribing to PTY events and flushing the pre-ready keystroke
+  // buffer). StrictMode-safe: the discarded first mount sets `cancelled = true`
+  // before this would fire, so the discarded mount does not invoke this callback.
+  // Captured via a ref so the parent can hand a fresh closure on every render
+  // without restarting the PTY session (which would happen if it were in the
+  // spawn `useEffect`'s dependency array).
+  onReady?: () => void;
 }
 
 // ── Per-sid spawn-chain (Ruinor F-1 resolution) ───────────────────────────────
@@ -97,6 +106,7 @@ export function Terminal({
   sessionId,
   onSessionContextChange,
   onShellContextChange,
+  onReady,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -121,6 +131,8 @@ export function Terminal({
   onSessionContextChangeRef.current = onSessionContextChange;
   const onShellContextChangeRef = useRef(onShellContextChange);
   onShellContextChangeRef.current = onShellContextChange;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   // Accumulates CWD/branch/repo across OSC 7 and OSC 7337 events.
   // Null before any OSC 7 has been received for this mount.
@@ -495,7 +507,9 @@ export function Terminal({
         });
       }
 
+      if (cancelled) return;
       isReadyRef.current = true;
+      onReadyRef.current?.();
     })();
 
     // ── Cleanup ───────────────────────────────────────────────────────────────

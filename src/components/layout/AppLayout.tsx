@@ -1,5 +1,15 @@
 import React, { Suspense } from "react";
-import { ActionIcon, AppShell, Burger, Group, Tabs, Text, Title } from "@mantine/core";
+import {
+  ActionIcon,
+  AppShell,
+  Burger,
+  Center,
+  Group,
+  Loader,
+  Tabs,
+  Text,
+  Title,
+} from "@mantine/core";
 import { useDisclosure, useHotkeys } from "@mantine/hooks";
 import { IconSettings } from "@tabler/icons-react";
 import { getCycleTargetId, getNumericTargetId } from "./tabNavigation";
@@ -10,6 +20,18 @@ import { NavBar } from "./NavBar";
 import { Terminal } from "../Terminal";
 import { SettingsModal } from "../settings";
 import { DungeonPanel } from "./DungeonPanel";
+
+// Shared loading indicator used by both loading gates (see two-gate comment below).
+function TerminalLoadingContent() {
+  return (
+    <Group gap="xs">
+      <Loader size="sm" />
+      <Text size="sm" c="dimmed">
+        loading…
+      </Text>
+    </Group>
+  );
+}
 
 function assertNever(x: never): React.ReactNode {
   console.error(`Unexpected card type: ${String(x)}`);
@@ -30,6 +52,8 @@ interface AppLayoutProps {
   onSessionContextChange: (id: string, ctx: SessionContext) => void;
   shellContext: Record<string, ShellContext>;
   onShellContextChange: (id: string, ctx: ShellContext) => void;
+  readyCardIds: Set<string>;
+  onCardReady: (id: string) => void;
 }
 
 export function AppLayout({
@@ -43,6 +67,8 @@ export function AppLayout({
   onSessionContextChange,
   shellContext,
   onShellContextChange,
+  readyCardIds,
+  onCardReady,
 }: AppLayoutProps) {
   const [opened, { toggle }] = useDisclosure(true);
   const [settingsOpened, { open: openSettings, close: closeSettings }] = useDisclosure(false);
@@ -179,19 +205,44 @@ export function AppLayout({
               // against a flex-column parent without an explicit definite height.
               <Tabs.Panel key={card.id} value={card.id} style={{ flex: 1, minHeight: 0 }}>
                 {card.type === "terminal" ? (
+                  // Two gates: (1) Suspense covers lazy chunk fetch; (2) the ready-overlay
+                  // below covers PTY spawn + flush. Both render the same visual to avoid a
+                  // UI flicker on the handoff.
                   <Suspense
                     fallback={
-                      <div
+                      <Center
                         data-testid="terminal-loading"
                         style={{ width: "100%", height: "100%" }}
-                      />
+                      >
+                        <TerminalLoadingContent />
+                      </Center>
                     }
                   >
-                    <Terminal
-                      sessionId={card.id}
-                      onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
-                      onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
-                    />
+                    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+                      {/* Inline closures are safe here — Terminal captures them via
+                          onReadyRef / onSessionContextChangeRef / onShellContextChangeRef
+                          and they are NOT in the spawn useEffect's deps.
+                          See Terminal.tsx for the ref-capture invariant. */}
+                      <Terminal
+                        sessionId={card.id}
+                        onSessionContextChange={(ctx) => onSessionContextChange(card.id, ctx)}
+                        onShellContextChange={(ctx) => onShellContextChange(card.id, ctx)}
+                        onReady={() => onCardReady(card.id)}
+                      />
+                      {/* The overlay is an absolutely-positioned sibling of <Terminal> and does NOT affect the terminal-root's measured dimensions. */}
+                      {!readyCardIds.has(card.id) && (
+                        <Center
+                          data-testid="terminal-loading-overlay"
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            backgroundColor: "var(--mantine-color-body)",
+                          }}
+                        >
+                          <TerminalLoadingContent />
+                        </Center>
+                      )}
+                    </div>
                   </Suspense>
                 ) : card.type === "dungeon" ? (
                   <DungeonPanel card={card} />

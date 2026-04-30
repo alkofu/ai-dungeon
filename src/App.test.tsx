@@ -12,6 +12,10 @@ import { Terminal } from "./components/Terminal/Terminal";
 // integration tests can fire OSC context changes through the full plumbing.
 let capturedOnSessionContextChange: ((ctx: SessionContext) => void) | undefined;
 let capturedOnShellContextChange: ((ctx: ShellContext) => void) | undefined;
+// Captures the most recently mounted Terminal's onReady callback (tests 1, 2, 4).
+let capturedOnReady: (() => void) | undefined;
+// Map-keyed-by-sessionId capture for the per-card independence test (test 3).
+const capturedOnReadyByCard = new Map<string, () => void>();
 
 // Mock the lazy re-export (index.ts) with an eager pass-through so React.lazy
 // resolves synchronously in tests. The concrete Terminal module mock below
@@ -27,9 +31,14 @@ vi.mock("./components/Terminal/Terminal", () => ({
       sessionId?: string;
       onSessionContextChange?: (ctx: SessionContext) => void;
       onShellContextChange?: (ctx: ShellContext) => void;
+      onReady?: () => void;
     }) => {
       capturedOnSessionContextChange = props.onSessionContextChange;
       capturedOnShellContextChange = props.onShellContextChange;
+      capturedOnReady = props.onReady;
+      if (props.sessionId !== undefined && props.onReady !== undefined) {
+        capturedOnReadyByCard.set(props.sessionId, props.onReady);
+      }
       // Render the sentinel div so existing tests that query terminal-root continue to work.
       return <div data-testid="terminal-root" />;
     },
@@ -98,6 +107,8 @@ describe("App", () => {
     vi.clearAllMocks();
     capturedOnSessionContextChange = undefined;
     capturedOnShellContextChange = undefined;
+    capturedOnReady = undefined;
+    capturedOnReadyByCard.clear();
     (invoke as unknown as AnyMock).mockResolvedValue(undefined);
 
     globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
@@ -375,6 +386,95 @@ describe("App", () => {
     // is used independently of sessionContext and that state independence is maintained.
     expect(screen.getByText("(shell)")).toBeInTheDocument();
   });
+
+  it("shows the loading overlay for a freshly-added terminal card", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+
+    // The parent has not received onReady yet, so the overlay should be visible.
+    expect(screen.getByTestId("terminal-loading-overlay")).toBeInTheDocument();
+  });
+
+  it("removes the loading overlay once Terminal fires onReady", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+
+    // Overlay present before onReady fires.
+    expect(screen.getByTestId("terminal-loading-overlay")).toBeInTheDocument();
+
+    // Fire onReady through the captured callback.
+    await act(async () => {
+      capturedOnReady?.();
+    });
+
+    // Overlay should be gone; terminal-root still present.
+    expect(screen.queryByTestId("terminal-loading-overlay")).toBeNull();
+    expect(screen.getByTestId("terminal-root")).toBeInTheDocument();
+  });
+
+  it("removes the loading overlay independently per card", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    // Add first terminal card.
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+
+    // Add second terminal card.
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+
+    // Both overlays present initially.
+    expect(screen.getAllByTestId("terminal-loading-overlay")).toHaveLength(2);
+
+    // Retrieve the first card's sessionId from the map (first entry added).
+    const [firstSessionId] = capturedOnReadyByCard.keys();
+    const firstOnReady = capturedOnReadyByCard.get(firstSessionId);
+
+    // Fire only the first card's onReady.
+    await act(async () => {
+      firstOnReady?.();
+    });
+
+    // Exactly one overlay should remain (the second card's).
+    expect(screen.getAllByTestId("terminal-loading-overlay")).toHaveLength(1);
+  });
+
+  it("removing a terminal card clears its readyCardIds entry (no leak)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<App />);
+
+    // Add a card and fire onReady.
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+
+    await act(async () => {
+      capturedOnReady?.();
+    });
+
+    // Overlay should be gone after onReady.
+    expect(screen.queryByTestId("terminal-loading-overlay")).toBeNull();
+
+    // Remove the card.
+    await user.click(screen.getByRole("button", { name: /Remove card/i }));
+
+    // Add a new card — it should show the overlay (fresh id, not in readyCardIds).
+    await user.click(screen.getByRole("button", { name: "Add card menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The new card's overlay must be present — proves readyCardIds doesn't leak.
+    expect(screen.getByTestId("terminal-loading-overlay")).toBeInTheDocument();
+  });
 });
 
 describe("appReducer", () => {
@@ -385,14 +485,27 @@ describe("appReducer", () => {
       activeId: "test-uuid-1",
       sessionContext: {},
       shellContext: {},
+      readyCardIds: new Set(),
     };
     expect(appReducer(state, { type: "activate", id: null })).toBe(state); // referential equality
   });
 
   it("activate accepts null when no cards exist", () => {
-    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const state: AppState = {
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
     const result = appReducer(state, { type: "activate", id: null });
-    expect(result).toEqual({ cards: [], activeId: null, sessionContext: {}, shellContext: {} });
+    expect(result).toEqual({
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    });
   });
 
   it("setSessionContext stores ctx keyed by card id", () => {
@@ -402,6 +515,7 @@ describe("appReducer", () => {
       activeId: "card-1",
       sessionContext: {},
       shellContext: {},
+      readyCardIds: new Set(),
     };
     const ctx = {
       sessionTs: "20260425-120000",
@@ -435,6 +549,7 @@ describe("appReducer", () => {
         activeId: null,
         sessionContext: {},
         shellContext: {},
+        readyCardIds: new Set(),
       },
       { type: "setSessionContext", id: "card-1", ctx: firstCtx },
     );
@@ -449,7 +564,13 @@ describe("appReducer", () => {
   });
 
   it("setSessionContext is a no-op if card id is not in state.cards", () => {
-    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const state: AppState = {
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
     const ctx = {
       sessionTs: "20260425-120000",
       slug: "test",
@@ -475,6 +596,7 @@ describe("appReducer", () => {
       activeId: "card-1",
       sessionContext: { "card-1": ctx },
       shellContext: {},
+      readyCardIds: new Set(),
     };
     const result = appReducer(state, { type: "remove", id: "card-1" });
     expect(result.sessionContext).not.toHaveProperty("card-1");
@@ -486,6 +608,7 @@ describe("appReducer", () => {
       activeId: "card-1",
       sessionContext: {},
       shellContext: {},
+      readyCardIds: new Set(),
     };
     const ctx: ShellContext = { workingDirectory: "/home/user", branch: "main" };
     const result = appReducer(state, { type: "setShellContext", id: "card-1", ctx });
@@ -493,14 +616,26 @@ describe("appReducer", () => {
   });
 
   it("setShellContext is a no-op if card id is not in state.cards", () => {
-    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const state: AppState = {
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
     const ctx: ShellContext = { workingDirectory: "/home/user" };
     const result = appReducer(state, { type: "setShellContext", id: "ghost-id", ctx });
     expect(result).toBe(state); // referential equality — no-op
   });
 
   it("add with cardType='dungeon' produces one dungeon card as activeId", () => {
-    const state: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const state: AppState = {
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
     const result = appReducer(state, { type: "add", cardType: "dungeon" });
     expect(result.cards).toHaveLength(1);
     expect(result.cards[0].type).toBe("dungeon");
@@ -508,7 +643,13 @@ describe("appReducer", () => {
   });
 
   it("add terminal then dungeon produces two cards in insertion order with dungeon active", () => {
-    const s0: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+    const s0: AppState = {
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
     const s1 = appReducer(s0, { type: "add", cardType: "terminal" });
     const s2 = appReducer(s1, { type: "add", cardType: "dungeon" });
     expect(s2.cards).toHaveLength(2);
@@ -525,6 +666,7 @@ describe("appReducer", () => {
       activeId: "term-1",
       sessionContext: {},
       shellContext: {},
+      readyCardIds: new Set(),
     };
     const result = appReducer(state, { type: "remove", id: "dung-1" });
     expect(result.cards).toHaveLength(1);
@@ -541,6 +683,7 @@ describe("appReducer", () => {
       activeId: "card-1",
       sessionContext: {},
       shellContext: { "card-1": firstCtx },
+      readyCardIds: new Set(),
     };
     const result = appReducer(state, { type: "setShellContext", id: "card-1", ctx: secondCtx });
     expect(result.shellContext["card-1"]).toEqual(secondCtx);
@@ -555,8 +698,58 @@ describe("appReducer", () => {
       activeId: "card-1",
       sessionContext: {},
       shellContext: { "card-1": ctx },
+      readyCardIds: new Set(),
     };
     const result = appReducer(state, { type: "remove", id: "card-1" });
     expect(result.shellContext).not.toHaveProperty("card-1");
+  });
+
+  it("add does not flip readyCardIds for the new card", () => {
+    const state: AppState = {
+      cards: [],
+      activeId: null,
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
+    const result = appReducer(state, { type: "add", cardType: "terminal" });
+    expect(result.readyCardIds.size).toBe(0);
+  });
+
+  it("markReady adds the id to readyCardIds", () => {
+    const card = { id: "card-1", type: "terminal" as const };
+    const state: AppState = {
+      cards: [card],
+      activeId: "card-1",
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(),
+    };
+    const result = appReducer(state, { type: "markReady", id: "card-1" });
+    expect(result.readyCardIds.has("card-1")).toBe(true);
+  });
+
+  it("markReady is idempotent (returns same state when id already present)", () => {
+    const state: AppState = {
+      cards: [{ id: "X", type: "terminal" as const }],
+      activeId: "X",
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(["X"]),
+    };
+    const result = appReducer(state, { type: "markReady", id: "X" });
+    expect(result).toBe(state); // referential equality
+  });
+
+  it("remove clears readyCardIds entry for the removed card", () => {
+    const state: AppState = {
+      cards: [{ id: "X", type: "terminal" as const }],
+      activeId: "X",
+      sessionContext: {},
+      shellContext: {},
+      readyCardIds: new Set(["X"]),
+    };
+    const result = appReducer(state, { type: "remove", id: "X" });
+    expect(result.readyCardIds.has("X")).toBe(false);
   });
 });
