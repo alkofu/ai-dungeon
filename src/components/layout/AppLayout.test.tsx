@@ -167,6 +167,8 @@ describe("AppLayout", () => {
         onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
+        readyCardIds={new Set()}
+        onCardReady={vi.fn()}
       />,
     );
 
@@ -203,6 +205,8 @@ describe("AppLayout", () => {
             onSessionContextChange={vi.fn()}
             shellContext={{}}
             onShellContextChange={vi.fn()}
+            readyCardIds={new Set()}
+            onCardReady={vi.fn()}
           />
         </React.StrictMode>,
       );
@@ -258,6 +262,8 @@ describe("AppLayout", () => {
         onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
+        readyCardIds={new Set()}
+        onCardReady={vi.fn()}
       />,
     );
 
@@ -284,6 +290,8 @@ describe("AppLayout", () => {
           onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
         />,
       );
       await Promise.resolve();
@@ -348,6 +356,8 @@ describe("AppLayout — keyboard navigation", () => {
         onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
+        readyCardIds={new Set()}
+        onCardReady={vi.fn()}
       />,
     );
     return { ...result, onActiveIdChange, user };
@@ -519,6 +529,8 @@ describe("AppLayout — shortcut tooltip overlay", () => {
         onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
+        readyCardIds={new Set()}
+        onCardReady={vi.fn()}
       />,
     );
 
@@ -568,6 +580,8 @@ describe("AppLayout — settings gear button and modal", () => {
         onSessionContextChange={vi.fn()}
         shellContext={{}}
         onShellContextChange={vi.fn()}
+        readyCardIds={new Set()}
+        onCardReady={vi.fn()}
       />,
     );
   }
@@ -643,6 +657,8 @@ describe("AppLayout — dungeon card rendering", () => {
           onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
         />,
       );
     });
@@ -682,6 +698,8 @@ describe("AppLayout — dungeon card rendering", () => {
           onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
         />,
       );
     });
@@ -725,6 +743,8 @@ describe("AppLayout — dungeon card rendering", () => {
           onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
         />,
       );
     });
@@ -754,6 +774,8 @@ describe("AppLayout — dungeon card rendering", () => {
           onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
         />,
       );
     });
@@ -769,5 +791,108 @@ describe("AppLayout — dungeon card rendering", () => {
       (c: unknown[]) => typeof c[0] === "string" && (c[0] as string).startsWith("pty_"),
     );
     expect(ptyAnyCalls).toHaveLength(0);
+  });
+});
+
+// ── Terminal loading indicator tests ──────────────────────────────────────────
+
+describe("AppLayout — terminal loading indicator", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+  });
+
+  it("renders the loading overlay over a terminal card whose id is not in readyCardIds", async () => {
+    await act(async () => {
+      renderWithProviders(
+        <AppLayout
+          cards={[{ id: "X", type: "terminal" }]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          activeId="X"
+          onActiveIdChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Overlay is visible because "X" is not in readyCardIds.
+    expect(screen.getByTestId("terminal-loading-overlay")).toBeInTheDocument();
+    // The terminal is still mounted underneath the overlay.
+    expect(screen.getByTestId("terminal-root")).toBeInTheDocument();
+  });
+
+  it("hides the loading overlay once readyCardIds includes the card id", async () => {
+    await act(async () => {
+      renderWithProviders(
+        <AppLayout
+          cards={[{ id: "X", type: "terminal" }]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          activeId="X"
+          onActiveIdChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+          readyCardIds={new Set(["X"])}
+          onCardReady={vi.fn()}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Overlay should not be present because "X" is in readyCardIds.
+    expect(screen.queryByTestId("terminal-loading-overlay")).toBeNull();
+    // The terminal remains mounted.
+    expect(screen.getByTestId("terminal-root")).toBeInTheDocument();
+  });
+
+  it("does not render a loading overlay for dungeon cards", async () => {
+    await act(async () => {
+      renderWithProviders(
+        <AppLayout
+          cards={[{ id: "D", type: "dungeon" }]}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          activeId="D"
+          onActiveIdChange={vi.fn()}
+          sessionContext={{}}
+          onSessionContextChange={vi.fn()}
+          shellContext={{}}
+          onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // No overlay for dungeon cards, even with an empty readyCardIds.
+    expect(screen.queryByTestId("terminal-loading-overlay")).toBeNull();
+    // The dungeon placeholder is present.
+    expect(screen.getByTestId("dungeon-placeholder-D")).toBeInTheDocument();
   });
 });

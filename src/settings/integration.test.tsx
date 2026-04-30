@@ -109,6 +109,8 @@ function renderIntegration() {
           onSessionContextChange={vi.fn()}
           shellContext={{}}
           onShellContextChange={vi.fn()}
+          readyCardIds={new Set()}
+          onCardReady={vi.fn()}
         />
       </MantineThemeBridge>
     </SettingsProvider>,

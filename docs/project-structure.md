@@ -16,7 +16,7 @@ ai-dungeon/
 │   ├── main.tsx      # Entry point — mounts MantineProvider, imports xterm CSS and fonts.css
 │   ├── styles/
 │   │   └── fonts.css # @font-face declarations for MesloLGS NF (all four faces)
-│   ├── App.tsx       # Root component — useReducer for cards + activeId; owns tab state
+│   ├── App.tsx       # Root component — useReducer for cards + activeId + readyCardIds; owns tab state and terminal loading state
 │   ├── types/
 │   │   ├── card.ts               # Card interface ({ id: string; type: CardType }) and CardType = "terminal" | "dungeon"; type is set at creation and never mutated
 │   │   ├── session.ts            # SessionContext (OSC 6800) and ShellContext (OSC 7/7337) interfaces; all values are UNTRUSTED. branch and repo are optional on both types (cleared by empty OSC 7337).
@@ -24,14 +24,14 @@ ai-dungeon/
 │   │   └── sessionPayload.test.ts
 │   └── components/
 │       ├── Terminal/
-│       │   ├── Terminal.tsx          # xterm.js wrapper — accepts sessionId prop; OSC 6800, OSC 7, and OSC 7337 handlers; PTY IPC, FitAddon, WebFontsAddon, base64 I/O; module-level per-sid spawn-chain serialises pty_spawn/pty_kill to prevent StrictMode remount races; awaits loadFonts() before term.open()
+│       │   ├── Terminal.tsx          # xterm.js wrapper — accepts sessionId and optional onReady props; OSC 6800, OSC 7, and OSC 7337 handlers; PTY IPC, FitAddon, WebFontsAddon, base64 I/O; module-level per-sid spawn-chain serialises pty_spawn/pty_kill to prevent StrictMode remount races; awaits loadFonts() before term.open(); fires onReady exactly once per live mount after term.open() executes and the spawn IIFE completes (StrictMode-safe via cancelled flag)
 │       │   ├── useDungeonSidecar.ts  # Hook: calls dungeon_open on mount and dungeon_close on unmount; promise-chain serialisation prevents StrictMode close-before-open races
 │       │   ├── useDungeonSend.ts     # Hook: exposes sendHi() — invokes the dungeon_send Tauri command with msg="Hi" and returns the sidecar reply string
 │       │   ├── useDungeonSend.test.ts
 │       │   ├── index.ts              # React.lazy dynamic import boundary — re-exports Terminal via React.lazy() so the xterm payload (~349 KB) is split into an async chunk instead of the synchronous initial bundle. Consumers must wrap <Terminal> in a <Suspense> boundary.
 │       │   └── Terminal.test.tsx
 │       └── layout/
-│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal> (wrapped in Suspense with a full-size transparent div fallback), dungeon cards render <DungeonPanel>; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
+│           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal> inside a two-gate loading system (Suspense fallback for the lazy chunk, plus an absolutely-positioned overlay for the PTY init window); overlay disappears when onCardReady is fired; dungeon cards render <DungeonPanel>; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
 │           ├── DungeonPanel.tsx       # Dungeon card panel — mounts useDungeonSidecar and useDungeonSend; renders Hi / Clean buttons; displays sidecar reply or error text
 │           ├── DungeonPanel.test.tsx
 │           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext and shellContext to each SessionCard
@@ -54,6 +54,29 @@ ai-dungeon/
 ├── tsconfig.json
 └── package.json
 ```
+
+## Terminal loading indicator (two-gate design)
+
+Adding a terminal card triggers two sequential loading windows before the terminal is usable:
+
+1. **Lazy-chunk download** — `Terminal` is loaded via `React.lazy`. The Suspense boundary in `AppLayout` shows the loading indicator while the xterm async chunk is being fetched. For subsequent terminals the chunk is cached, so this window collapses to sub-frame duration.
+2. **PTY initialisation** — after the chunk lands and `Terminal` mounts, two concurrent async operations run inside the spawn `useEffect`: `loadFonts()` (font measurement) and `pty_spawn` (shell startup). The terminal `<div>` is empty until both complete.
+
+Both windows are covered by a single visual treatment: a Mantine `<Loader size="sm" />` spinner plus the dimmed text "loading…", centred inside the card panel.
+
+### Implementation
+
+- **Gate 1 (Suspense fallback):** `AppLayout` wraps `<Terminal>` in `<Suspense>` with a `<Center data-testid="terminal-loading">` fallback that renders `TerminalLoadingContent`.
+- **Gate 2 (ready overlay):** `AppLayout` renders an absolutely-positioned `<Center data-testid="terminal-loading-overlay">` sibling of `<Terminal>` with `inset: 0` and `backgroundColor: var(--mantine-color-body)`. The overlay is rendered only while the card's id is absent from `readyCardIds` (a `Set<string>` in `AppState`).
+- **`onReady` prop on `Terminal`:** When the spawn IIFE reaches the end of its happy path (after `term.open()` and PTY event subscription), it sets `isReadyRef.current = true` and calls `onReadyRef.current?.()`. The callback is captured via a ref so the parent can supply a fresh closure on every render without adding it to the spawn `useEffect`'s dependency array (which would restart the PTY). The call is gated on `!cancelled` so a StrictMode-discarded mount cannot flip the parent's ready state.
+- **`readyCardIds` in `AppState`:** `App.tsx` maintains a `Set<string>` of card ids whose `Terminal` has fired `onReady`. The `markReady` reducer action adds an id (idempotent, returns the same state reference if already present). The `remove` reducer clears the id so a later card with a fresh id starts in the loading state.
+
+### Constraints
+
+- The overlay is scoped to a single `Tabs.Panel` — there is no global app-level loading splash.
+- Dungeon cards are not covered by this system; no overlay is rendered for them.
+- Tab switching between two already-ready terminals does not re-show the overlay — `readyCardIds` persists across tab switches.
+- If `pty_spawn` rejects, `onReady` is never called and the overlay remains. This is documented graceful-degradation behaviour; PTY errors are surfaced inside the terminal canvas via `term.writeln`.
 
 ## MesloLGS NF / xterm font loading
 

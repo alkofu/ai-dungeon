@@ -10,6 +10,7 @@ export interface AppState {
   activeId: string | null;
   sessionContext: Record<string, SessionContext>;
   shellContext: Record<string, ShellContext>;
+  readyCardIds: Set<string>;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -19,7 +20,8 @@ type AppAction =
   | { type: "remove"; id: string }
   | { type: "activate"; id: string | null }
   | { type: "setSessionContext"; id: string; ctx: SessionContext }
-  | { type: "setShellContext"; id: string; ctx: ShellContext };
+  | { type: "setShellContext"; id: string; ctx: ShellContext }
+  | { type: "markReady"; id: string };
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         activeId: newCard.id,
         sessionContext: state.sessionContext,
         shellContext: state.shellContext,
+        // The new card is not yet ready — readyCardIds is unchanged.
+        readyCardIds: state.readyCardIds,
       };
     }
     case "remove": {
@@ -64,11 +68,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const { [action.id]: _removedShell, ...remainingShellContext } = state.shellContext;
       void _removedShell;
 
+      // Also clear the removed card's ready state to avoid leaking across long sessions.
+      const nextReady = new Set(state.readyCardIds);
+      nextReady.delete(action.id);
+
       return {
         cards: remaining,
         activeId: nextActiveId,
         sessionContext: remainingSessionContext,
         shellContext: remainingShellContext,
+        readyCardIds: nextReady,
       };
     }
     case "activate": {
@@ -95,12 +104,23 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         shellContext: { ...state.shellContext, [action.id]: action.ctx },
       };
     }
+    case "markReady": {
+      // Idempotent: return same state reference when id is already present.
+      if (state.readyCardIds.has(action.id)) return state;
+      return { ...state, readyCardIds: new Set([...state.readyCardIds, action.id]) };
+    }
     default:
       return state;
   }
 }
 
-const initialState: AppState = { cards: [], activeId: null, sessionContext: {}, shellContext: {} };
+const initialState: AppState = {
+  cards: [],
+  activeId: null,
+  sessionContext: {},
+  shellContext: {},
+  readyCardIds: new Set(),
+};
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -133,6 +153,10 @@ export function App() {
     dispatch({ type: "setShellContext", id, ctx });
   }, []);
 
+  const markReady = useCallback((id: string) => {
+    dispatch({ type: "markReady", id });
+  }, []);
+
   return (
     <AppLayout
       cards={state.cards}
@@ -145,6 +169,8 @@ export function App() {
       onSessionContextChange={setSessionContext}
       shellContext={state.shellContext}
       onShellContextChange={setShellContext}
+      readyCardIds={state.readyCardIds}
+      onCardReady={markReady}
     />
   );
 }

@@ -1241,6 +1241,136 @@ describe("Terminal", () => {
     expect(termInstance.open).not.toHaveBeenCalled();
   });
 
+  // ── onReady callback ──────────────────────────────────────────────────────
+
+  describe("Terminal — onReady callback", () => {
+    it("calls onReady exactly once after spawn resolves and flush completes", async () => {
+      const spy = vi.fn();
+      renderWithProviders(
+        <Terminal sessionId="00000000-0000-0000-0000-000000000001" onReady={spy} />,
+      );
+
+      const mockListen = listen as unknown as AnyMock;
+      // Wait for both listen() calls — this is the same signal used to confirm
+      // the spawn IIFE has fully completed (isReadyRef.current = true reached).
+      await vi.waitFor(() => {
+        expect(mockListen).toHaveBeenCalledTimes(2);
+      });
+
+      await vi.waitFor(() => {
+        expect(spy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("does NOT call onReady before spawn resolves", async () => {
+      const mockInvoke = invoke as unknown as AnyMock;
+
+      let resolveSpawn!: (value: number) => void;
+      const spawnPromise = new Promise<number>((resolve) => {
+        resolveSpawn = resolve;
+      });
+      mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+      const spy = vi.fn();
+      renderWithProviders(
+        <Terminal sessionId="00000000-0000-0000-0000-000000000001" onReady={spy} />,
+      );
+
+      // Drain microtasks without resolving spawn — onReady must not have fired.
+      await act(async () => {
+        await drain(10);
+      });
+      expect(spy).not.toHaveBeenCalled();
+
+      // Now resolve spawn and wait for onReady to fire.
+      await act(async () => {
+        resolveSpawn(1);
+        await spawnPromise;
+      });
+
+      await vi.waitFor(() => {
+        expect(spy).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("does NOT call onReady when the component unmounts before spawn resolves (StrictMode discarded-mount guard)", async () => {
+      const mockInvoke = invoke as unknown as AnyMock;
+
+      let resolveSpawn!: (value: number) => void;
+      const spawnPromise = new Promise<number>((resolve) => {
+        resolveSpawn = resolve;
+      });
+      mockInvoke.mockImplementationOnce(() => spawnPromise);
+
+      const spy = vi.fn();
+      const { unmount } = renderWithProviders(
+        <Terminal sessionId="00000000-0000-0000-0000-000000000001" onReady={spy} />,
+      );
+
+      // Wait for onData registration, then unmount before spawn resolves.
+      await vi.waitFor(() => {
+        expect(onDataSpy).toHaveBeenCalled();
+      });
+
+      act(() => {
+        unmount();
+      });
+
+      // Resolve spawn after unmount — IIFE sees cancelled=true and returns early.
+      await act(async () => {
+        resolveSpawn(1);
+        await spawnPromise;
+      });
+
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("does NOT call onReady when spawn rejects", async () => {
+      const mockInvoke = invoke as unknown as AnyMock;
+      mockInvoke.mockRejectedValueOnce(new Error("shell not found"));
+
+      const spy = vi.fn();
+      renderWithProviders(
+        <Terminal sessionId="00000000-0000-0000-0000-000000000001" onReady={spy} />,
+      );
+
+      const termInstance = getTermInstance();
+      await vi.waitFor(() => {
+        expect(termInstance.writeln).toHaveBeenCalledWith(
+          expect.stringContaining("[failed to start shell:"),
+        );
+      });
+
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("calls onReady after fonts load even when loadFonts rejects (graceful degradation)", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      loadFontsSpy.mockRejectedValueOnce(
+        'font family "MesloLGS NF" not registered in document.fonts',
+      );
+
+      const spy = vi.fn();
+      renderWithProviders(
+        <Terminal sessionId="00000000-0000-0000-0000-000000000001" onReady={spy} />,
+      );
+
+      const termInstance = getTermInstance();
+      // term.open is still called despite loadFonts rejection.
+      await vi.waitFor(() => {
+        expect(termInstance.open).toHaveBeenCalledTimes(1);
+      });
+
+      // onReady fires because the spawn IIFE does not depend on the font-load IIFE's success.
+      await vi.waitFor(() => {
+        expect(spy).toHaveBeenCalledTimes(1);
+      });
+
+      warnSpy.mockRestore();
+    });
+  });
+
   it("buffers keystrokes typed during font load and flushes them after spawn resolves", async () => {
     const mockInvoke = invoke as unknown as AnyMock;
 
