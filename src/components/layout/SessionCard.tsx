@@ -138,22 +138,26 @@ export function SessionCard({
           </Tooltip>
         </Group>
 
-        {/* Row 3: PR badge, Issue badge, placeholder badge */}
+        {/* Row 3: optional PR badge, optional Issue badge, placeholder badge */}
         <Group gap="xs" wrap="nowrap">
-          <Badge
-            size="xs"
-            variant="light"
-            leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
-          >
-            {prNumber ? `PR #${prNumber}` : "PR —"}
-          </Badge>
-          <Badge
-            size="xs"
-            variant="light"
-            leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
-          >
-            {issueNumber ? `#${issueNumber}` : "Issue —"}
-          </Badge>
+          {prNumber != null && (
+            <Badge
+              size="xs"
+              variant="light"
+              leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
+            >
+              {`PR #${prNumber}`}
+            </Badge>
+          )}
+          {issueNumber != null && (
+            <Badge
+              size="xs"
+              variant="light"
+              leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
+            >
+              {`#${issueNumber}`}
+            </Badge>
+          )}
           {/* No leftSection: placeholder badge intentionally renders no icon. */}
           <Badge size="xs" variant="light">
             —

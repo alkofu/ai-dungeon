@@ -125,16 +125,11 @@ describe("SessionCard", () => {
     expect(screen.queryByText(SESSION_CONTEXT_FIXTURES[1].workingDirectory)).toBeNull();
   });
 
-  it("9a. PR badge shows 'PR —' when prNumber is undefined", () => {
-    // Fixture 2 has no prNumber
+  it("9a. PR badge is omitted entirely when prNumber is undefined", () => {
+    // Fixture 2 has no prNumber — badge and icon must both be absent
     renderInTabs(CARD_ID_F2);
-    expect(screen.getByText("PR —")).toBeInTheDocument();
-  });
-
-  it("9d. PR badge renders the pull-request icon when prNumber is undefined", () => {
-    // Fixture 2 has no prNumber — icon must still be present in the empty state
-    renderInTabs(CARD_ID_F2);
-    expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
+    expect(screen.queryByText(/^PR /)).toBeNull();
+    expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
   });
 
   it("9b. PR badge shows 'PR #n' when prNumber is defined", () => {
@@ -149,16 +144,12 @@ describe("SessionCard", () => {
     expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
   });
 
-  it("10a. Issue badge shows 'Issue —' when issueNumber is undefined", () => {
-    // Fixture 1 has no issueNumber
+  it("10a. Issue badge is omitted entirely when issueNumber is undefined", () => {
+    // Fixture 1 has no issueNumber — badge and icon must both be absent
     renderInTabs(CARD_ID_F1);
-    expect(screen.getByText("Issue —")).toBeInTheDocument();
-  });
-
-  it("10d. Issue badge renders the issue icon when issueNumber is undefined", () => {
-    // Fixture 1 has no issueNumber — icon must still be present in the empty state
-    renderInTabs(CARD_ID_F1);
-    expect(screen.getByRole("img", { name: "Issue" })).toBeInTheDocument();
+    expect(screen.queryByText(/^Issue /)).toBeNull();
+    expect(screen.queryByText(/^#\d+$/)).toBeNull();
+    expect(screen.queryByRole("img", { name: "Issue" })).toBeNull();
   });
 
   it("10b. Issue badge shows '#n' when issueNumber is defined", () => {
@@ -180,13 +171,40 @@ describe("SessionCard", () => {
   });
 
   it("11b. placeholder badge renders no icon", () => {
-    // Fixture 3 has neither PR nor Issue
+    // Fixture 3 has neither PR nor Issue — only the placeholder badge remains
     const { container } = renderInTabs(CARD_ID_F3);
     const badges = container.querySelectorAll(".mantine-Badge-root");
-    expect(badges).toHaveLength(3);
-    const thirdBadge = badges[2];
-    expect(thirdBadge.querySelectorAll('[role="img"]')).toHaveLength(0);
-    expect(thirdBadge.textContent).toContain("—");
+    expect(badges).toHaveLength(1);
+    const firstBadge = badges[0];
+    expect(firstBadge.querySelectorAll('[role="img"]')).toHaveLength(0);
+    expect(firstBadge.textContent).toContain("—");
+  });
+
+  it("11c. PR and Issue badges are both absent when fixture has neither prNumber nor issueNumber", () => {
+    renderInTabs(CARD_ID_F3);
+    expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
+    expect(screen.queryByRole("img", { name: "Issue" })).toBeNull();
+    expect(screen.queryByText(/^PR/)).toBeNull();
+  });
+
+  it("11d. only PR badge renders when issueNumber is absent (fixture 1)", () => {
+    // Fixture 1: prNumber=7, issueNumber=undefined
+    const { container } = renderInTabs(CARD_ID_F1);
+    expect(screen.getByText("PR #7")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Issue" })).toBeNull();
+    const badges = container.querySelectorAll(".mantine-Badge-root");
+    expect(badges).toHaveLength(2);
+  });
+
+  it("11e. only Issue badge renders when prNumber is absent (fixture 2)", () => {
+    // Fixture 2: prNumber=undefined, issueNumber=99
+    const { container } = renderInTabs(CARD_ID_F2);
+    expect(screen.getByText("#99")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Issue" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
+    const badges = container.querySelectorAll(".mantine-Badge-root");
+    expect(badges).toHaveLength(2);
   });
 
   // ── Shortcut tooltip overlay tests ───────────────────────────────────────────
