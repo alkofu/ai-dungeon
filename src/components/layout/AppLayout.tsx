@@ -188,6 +188,7 @@ export function AppLayout({
             sessionContext={sessionContext}
             shellContext={shellContext}
             modifierPressed={modifierPressed}
+            activeId={activeId}
           />
         </AppShell.Navbar>
 

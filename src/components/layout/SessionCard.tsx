@@ -1,5 +1,5 @@
 import type React from "react";
-import { ActionIcon, Badge, Group, Stack, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconCircleDot, IconGitPullRequest } from "@tabler/icons-react";
 import type { SessionContext, ShellContext } from "../../types/session";
 import { getMockSessionContext } from "./sessionContext.mock";
@@ -24,6 +24,10 @@ interface SessionCardProps {
   modifierPressed?: boolean;
   /** 1-based position of this card in the NavBar cards array. Overlay is only shown for positions 1–9. */
   position?: number;
+  /** When true, applies the active visual treatment — dark background and bold typography. Defaults to false. */
+  active?: boolean;
+  /** Optional status subtitle rendered below the slug. When undefined the line is omitted entirely. */
+  status?: string;
 }
 
 /**
@@ -46,6 +50,8 @@ export function SessionCard({
   shellContext,
   modifierPressed = false,
   position = undefined,
+  active = false,
+  status,
 }: SessionCardProps) {
   // Intentional: OSC 7337 clear does not erase branch/repo on a session-bound card.
   // SessionContext is authoritative over transient shell drift.
@@ -72,98 +78,117 @@ export function SessionCard({
       withArrow
       withinPortal={true}
     >
-      <Stack gap="xs">
-        {/* Row 1: slug + close button */}
-        <Group justify="space-between" wrap="nowrap">
-          <Text size="sm" fw={700}>
-            {isSessionContext(meta) ? meta.slug : "(shell)"}
-          </Text>
-          {/* component="div" avoids nesting <button> inside <button>
+      <Box
+        bg={active ? "dark.7" : "transparent"}
+        p="xs"
+        style={{ borderRadius: "var(--mantine-radius-sm)" }}
+        data-active={active ? "true" : "false"}
+      >
+        <Stack gap="xs">
+          {/* Row 1: slug + close button */}
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="sm" fw={active ? 700 : 500}>
+              {isSessionContext(meta) ? meta.slug : "(shell)"}
+            </Text>
+            {/* component="div" avoids nesting <button> inside <button>
               (Tabs.Tab renders as <button>; ActionIcon renders as <button> by default,
               which is invalid HTML). Using a div with role="button" keeps the
               accessible name and click behaviour while producing valid HTML. */}
-          <ActionIcon
-            component="div"
-            role="button"
-            aria-label={`Remove card ${cardId.slice(0, 8)}`}
-            variant="subtle"
-            size="xs"
-            tabIndex={0}
-            onClick={(event: React.MouseEvent) => {
-              event.stopPropagation();
-              onRemove(cardId);
-            }}
-            onKeyDown={(e: React.KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                e.stopPropagation();
+            <ActionIcon
+              component="div"
+              role="button"
+              aria-label={`Remove card ${cardId.slice(0, 8)}`}
+              variant="subtle"
+              size="xs"
+              tabIndex={0}
+              onClick={(event: React.MouseEvent) => {
+                event.stopPropagation();
                 onRemove(cardId);
-              }
-            }}
-          >
-            ×
-          </ActionIcon>
-        </Group>
+              }}
+              onKeyDown={(e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRemove(cardId);
+                }
+              }}
+            >
+              ×
+            </ActionIcon>
+          </Group>
 
-        {/* Row 2: [repo : branch •] path-tail
+          {status != null && (
+            <Text size="xs" c={active ? "gray.4" : "dimmed"}>
+              {status}
+            </Text>
+          )}
+
+          {/* Row 2: [repo : branch •] path-tail
             repo and branch are optional — cleared by empty OSC 7337.
             When absent, their segments (including the : and • separators) are omitted. */}
-        <Group gap="xs" wrap="nowrap">
-          {meta.repo != null && (
-            <>
-              <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
-                <Text size="xs" c="dimmed" truncate>
-                  {meta.repo.name}
+          <Group gap="xs" wrap="nowrap">
+            {meta.repo != null && (
+              <>
+                <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
+                  <Text size="xs" c={active ? "white" : "dimmed"} truncate>
+                    {meta.repo.name}
+                  </Text>
+                </Tooltip>
+                <Text size="xs" c={active ? "white" : "dimmed"}>
+                  :
                 </Text>
-              </Tooltip>
-              <Text size="xs" c="dimmed">
-                :
+              </>
+            )}
+            {meta.branch != null && (
+              <>
+                <Text size="xs" c={active ? "white" : "dimmed"} truncate>
+                  {meta.branch}
+                </Text>
+                <Text size="xs" c={active ? "white" : "dimmed"}>
+                  •
+                </Text>
+              </>
+            )}
+            <Tooltip label={meta.workingDirectory} withinPortal={false}>
+              <Text size="xs" c={active ? "white" : "dimmed"} truncate>
+                {lastSegments(meta.workingDirectory)}
               </Text>
-            </>
-          )}
-          {meta.branch != null && (
-            <>
-              <Text size="xs" c="dimmed" truncate>
-                {meta.branch}
-              </Text>
-              <Text size="xs" c="dimmed">
-                •
-              </Text>
-            </>
-          )}
-          <Tooltip label={meta.workingDirectory} withinPortal={false}>
-            <Text size="xs" c="dimmed" truncate>
-              {lastSegments(meta.workingDirectory)}
-            </Text>
-          </Tooltip>
-        </Group>
+            </Tooltip>
+          </Group>
 
-        {/* Row 3: optional PR badge, optional Issue badge, placeholder badge */}
-        <Group gap="xs" wrap="nowrap">
-          {prNumber != null && (
-            <Badge
-              size="xs"
-              variant="light"
-              leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
-            >
-              {`PR #${prNumber}`}
+          {/* Row 3: optional PR badge, optional Issue badge, placeholder badge */}
+          <Box
+            style={{
+              borderTop: "1px solid var(--mantine-color-default-border)",
+              paddingTop: "var(--mantine-spacing-xs)",
+            }}
+          />
+          <Group gap="xs" wrap="nowrap" opacity={0.6}>
+            {prNumber != null && (
+              <Badge
+                size="xs"
+                variant="light"
+                leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
+              >
+                {`PR #${prNumber}`}
+              </Badge>
+            )}
+            {issueNumber != null && (
+              <Badge
+                size="xs"
+                variant="light"
+                leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
+              >
+                {`#${issueNumber}`}
+              </Badge>
+            )}
+            {/* No leftSection: placeholder badge intentionally renders no icon. */}
+            <Badge size="xs" variant="light">
+              —
             </Badge>
-          )}
-          {issueNumber != null && (
-            <Badge
-              size="xs"
-              variant="light"
-              leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
-            >
-              {`#${issueNumber}`}
-            </Badge>
-          )}
-          {/* No leftSection: placeholder badge intentionally renders no icon. */}
-          <Badge size="xs" variant="light">
-            —
-          </Badge>
-        </Group>
-      </Stack>
+          </Group>
+        </Stack>
+      </Box>
     </Tooltip>
   );
 }
