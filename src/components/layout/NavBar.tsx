@@ -12,6 +12,7 @@ interface NavBarProps {
   shellContext: Record<string, ShellContext>;
   /** When true, each card renders a shortcut hint overlay (⌘N / Ctrl+N). Optional so existing tests that omit it remain valid. */
   modifierPressed?: boolean;
+  activeId: string | null;
 }
 
 export function NavBar({
@@ -22,6 +23,7 @@ export function NavBar({
   sessionContext,
   shellContext,
   modifierPressed = false,
+  activeId,
 }: NavBarProps) {
   return (
     <>
@@ -50,6 +52,7 @@ export function NavBar({
         <Tabs.List>
           {cards.map((card, index) => {
             const position = index + 1;
+            const isActive = card.id === activeId;
             return (
               // Mantine's `Tabs.Tab` button defaults to `display: flex; align-items: center;
               // white-space: nowrap` with no width constraint, so it sizes to the intrinsic
@@ -78,6 +81,7 @@ export function NavBar({
                   shellContext={shellContext[card.id]}
                   modifierPressed={modifierPressed}
                   position={position}
+                  active={isActive}
                 />
               </Tabs.Tab>
             );

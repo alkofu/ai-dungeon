@@ -34,8 +34,8 @@ ai-dungeon/
 │           ├── AppLayout.tsx          # Mantine Tabs + AppShell — branches cards.map on card.type: terminal cards render <Terminal> inside a two-gate loading system (Suspense fallback for the lazy chunk, plus an absolutely-positioned overlay for the PTY init window); overlay disappears when onCardReady is fired; dungeon cards render <DungeonPanel>; includes assertNever exhaustiveness guard; threads sessionContext + shellContext callbacks to NavBar and Terminal
 │           ├── DungeonPanel.tsx       # Dungeon card panel — mounts useDungeonSidecar and useDungeonSend; renders Hi / Clean buttons; displays sidecar reply or error text
 │           ├── DungeonPanel.test.tsx
-│           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext and shellContext to each SessionCard
-│           ├── SessionCard.tsx        # 3-row tab label: slug + close button, repo:branch • path-tail, PR/Issue badges; rendering precedence: sessionContext ?? shellContext ?? mock
+│           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext, shellContext, and active state to each SessionCard
+│           ├── SessionCard.tsx        # Tab label: slug + close button (bold on active), optional status subtitle, repo:branch • path-tail, PR/Issue badges below a divider at 60% opacity; active cards receive a dark.7 background; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
 │           ├── sessionContext.mock.ts  # Deterministic mock SessionContext fixtures keyed by card id
 │           └── index.ts              # Barrel export

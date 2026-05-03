@@ -263,6 +263,58 @@ describe("SessionCard", () => {
     });
   });
 
+  describe("active visual state", () => {
+    it("defaults to inactive", () => {
+      const { container } = renderInTabs(CARD_ID_F0);
+      expect(container.querySelector('[data-active="false"]')).not.toBeNull();
+      expect(container.querySelector('[data-active="true"]')).toBeNull();
+    });
+
+    it("active=true", () => {
+      const { container } = renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value={CARD_ID_F0}>
+            <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} active={true} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+      expect(container.querySelector('[data-active="true"]')).not.toBeNull();
+    });
+
+    it("active=false explicit", () => {
+      const { container } = renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value={CARD_ID_F0}>
+            <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} active={false} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+      expect(container.querySelector('[data-active="false"]')).not.toBeNull();
+    });
+  });
+
+  describe("status subtitle", () => {
+    it("status omitted", () => {
+      renderInTabs(CARD_ID_F0);
+      expect(screen.queryByText(/Claude is waiting/)).toBeNull();
+    });
+
+    it("status set", () => {
+      renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value={CARD_ID_F0}>
+            <SessionCard
+              cardId={CARD_ID_F0}
+              onRemove={vi.fn()}
+              status="Claude is waiting for your input"
+            />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+      expect(screen.getByText("Claude is waiting for your input")).toBeInTheDocument();
+    });
+  });
+
   it("mock module is deterministic: same cardId returns deeply equal objects", () => {
     const id = "test-determinism-check";
     const a = getMockSessionContext(id);

@@ -41,6 +41,7 @@ describe("NavBar", () => {
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -60,6 +61,7 @@ describe("NavBar", () => {
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -81,6 +83,7 @@ describe("NavBar", () => {
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -104,6 +107,7 @@ describe("NavBar", () => {
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -126,6 +130,7 @@ describe("NavBar", () => {
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -150,6 +155,7 @@ describe("NavBar", () => {
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -171,6 +177,7 @@ describe("NavBar", () => {
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -194,6 +201,7 @@ describe("NavBar", () => {
         onRemoveCard={onRemoveCard}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -229,6 +237,7 @@ describe("NavBar", () => {
         onRemoveCard={vi.fn()}
         sessionContext={{}}
         shellContext={{}}
+        activeId={null}
       />,
     );
 
@@ -259,6 +268,7 @@ describe("NavBar", () => {
           sessionContext={{}}
           shellContext={{}}
           modifierPressed={true}
+          activeId={null}
         />,
       );
 
@@ -279,6 +289,7 @@ describe("NavBar", () => {
           sessionContext={{}}
           shellContext={{}}
           modifierPressed={false}
+          activeId={null}
         />,
       );
 
@@ -297,6 +308,7 @@ describe("NavBar", () => {
           sessionContext={{}}
           shellContext={{}}
           modifierPressed={true}
+          activeId={null}
         />,
       );
 
@@ -311,6 +323,28 @@ describe("NavBar", () => {
       // Card 10 itself is still rendered — only the overlay is suppressed
       expect(screen.getByRole("button", { name: /Remove card card-10/i })).toBeInTheDocument();
     });
+  });
+
+  it("forwards active prop: card whose id matches activeId has data-active='true'; others 'false'", () => {
+    const { container } = renderNavBar(
+      <NavBar
+        cards={[
+          { id: "a", type: "terminal" },
+          { id: "b", type: "terminal" },
+        ]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        sessionContext={{}}
+        shellContext={{}}
+        activeId="a"
+      />,
+    );
+
+    const activeCards = container.querySelectorAll('[data-active="true"]');
+    const inactiveCards = container.querySelectorAll('[data-active="false"]');
+    expect(activeCards).toHaveLength(1);
+    expect(inactiveCards).toHaveLength(1);
   });
 
   it("does NOT trigger the tab onChange when the close button is clicked (stopPropagation)", async () => {
@@ -331,6 +365,7 @@ describe("NavBar", () => {
           onRemoveCard={onRemoveCard}
           sessionContext={{}}
           shellContext={{}}
+          activeId={null}
         />
       </Tabs>,
     );
