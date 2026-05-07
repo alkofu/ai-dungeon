@@ -32,19 +32,6 @@ interface SessionCardProps {
   needsReview?: boolean;
 }
 
-/**
- * Returns the last 1-2 path segments of a POSIX path (forward-slash only).
- * Trailing slashes are stripped before splitting.
- */
-export function lastSegments(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  const parts = trimmed.split("/").filter(Boolean);
-  if (parts.length >= 2) {
-    return parts.slice(-2).join("/");
-  }
-  return parts[parts.length - 1] ?? "";
-}
-
 export function SessionCard({
   cardId,
   onRemove,

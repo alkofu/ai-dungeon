@@ -258,7 +258,7 @@ describe("NavBar", () => {
   // ── Shortcut chip tests ───────────────────────────────────────────────────
 
   describe("persistent shortcut chip", () => {
-    it("3 cards + modifierPressed=true: DOM contains ⌘1, ⌘2, ⌘3", () => {
+    it("3 cards: shortcut chips ⌘1, ⌘2, ⌘3 are rendered", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(3)}
@@ -267,26 +267,6 @@ describe("NavBar", () => {
           onRemoveCard={vi.fn()}
           sessionContext={{}}
           shellContext={{}}
-          modifierPressed={true}
-          activeId={null}
-        />,
-      );
-
-      expect(screen.getByText("⌘1")).toBeInTheDocument();
-      expect(screen.getByText("⌘2")).toBeInTheDocument();
-      expect(screen.getByText("⌘3")).toBeInTheDocument();
-    });
-
-    it("3 cards: ⌘1, ⌘2, ⌘3 are present regardless of modifierPressed", () => {
-      renderNavBar(
-        <NavBar
-          cards={makeCards(3)}
-          onAddTerminalCard={vi.fn()}
-          onAddDungeonCard={vi.fn()}
-          onRemoveCard={vi.fn()}
-          sessionContext={{}}
-          shellContext={{}}
-          modifierPressed={false}
           activeId={null}
         />,
       );
