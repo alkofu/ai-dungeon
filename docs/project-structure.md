@@ -37,8 +37,10 @@ ai-dungeon/
 │           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext, shellContext, and active state to each SessionCard
 │           ├── SessionCard.tsx        # Tab label: slug + close button (bold on active), optional status subtitle, repo:branch • path-tail, PR/Issue badges below a divider at 60% opacity; active cards receive a dark.7 background; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
+│           ├── NavbarResizer.tsx      # Draggable separator between sidebar and main content. Props: width, onWidthChange (fired every pointermove), onCommit (fired on pointerup and each keyboard nudge), min, max, visible. Uses setPointerCapture for pointer locking. Exposes role="separator" with aria-orientation, aria-valuenow/min/max. Hidden (display: none, tabIndex=-1) when visible===false (sidebar collapsed).
+│           ├── useNavbarWidth.ts     # Hook: reads settings.layout?.navbarWidth (fallback 250), clamps into [MIN_NAVBAR_WIDTH, MAX_NAVBAR_WIDTH], exposes { width, setWidth, MIN, MAX }. setWidth persists via updateSettings — clamping is applied before the call. Exports MIN_NAVBAR_WIDTH=160 and MAX_NAVBAR_WIDTH=600 as named constants.
 │           ├── sessionContext.mock.ts  # Deterministic mock SessionContext fixtures keyed by card id
-│           └── index.ts              # Barrel export
+│           └── index.ts              # Barrel export — re-exports AppLayout, NavBar, NavbarResizer, useNavbarWidth, MIN_NAVBAR_WIDTH, MAX_NAVBAR_WIDTH
 ├── src-tauri/        # Rust backend (Tauri)
 │   ├── src/
 │   │   ├── main.rs   # Binary entry point

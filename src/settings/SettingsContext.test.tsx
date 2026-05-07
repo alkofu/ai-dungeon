@@ -271,6 +271,61 @@ describe("SettingsProvider", () => {
     consoleSpy.mockRestore();
   });
 
+  it("deep-merge: updateSettings({ layout: { navbarWidth: 320 } }) persists the merged value and preserves terminal.fontSize", async () => {
+    const initialSettings = { ...DEFAULT_SETTINGS };
+    const saveSettingsMock = vi.fn(() => Promise.resolve());
+
+    vi.doMock("./persistence", () => ({
+      loadSettings: vi.fn(() => Promise.resolve(initialSettings)),
+      saveSettings: saveSettingsMock,
+    }));
+
+    const { SettingsProvider, useSettings } = await import("./SettingsContext");
+
+    let capturedSettings: typeof DEFAULT_SETTINGS | null = null;
+
+    function Consumer() {
+      const { settings, updateSettings } = useSettings();
+      capturedSettings = settings;
+      return (
+        <button
+          onClick={() => {
+            void updateSettings({ layout: { navbarWidth: 320 } });
+          }}
+        >
+          Set width
+        </button>
+      );
+    }
+
+    await act(async () => {
+      render(
+        <SettingsProvider>
+          <Consumer />
+        </SettingsProvider>,
+      );
+    });
+
+    await act(async () => {
+      screen.getByText("Set width").click();
+    });
+
+    await waitFor(() => {
+      expect(capturedSettings?.layout?.navbarWidth).toBe(320);
+    });
+
+    // terminal.fontSize must be preserved through the merge
+    expect(capturedSettings?.terminal.fontSize).toBe(13);
+
+    // saveSettings must have been called with the merged object
+    expect(saveSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminal: { fontSize: 13 },
+        layout: { navbarWidth: 320 },
+      }),
+    );
+  });
+
   it("deep-merge: updateSettings({ terminal: { fontSize: 20 } }) preserves other terminal fields", async () => {
     type ExtendedSettings = typeof DEFAULT_SETTINGS & {
       terminal: { fontSize: number; _testKey: string };

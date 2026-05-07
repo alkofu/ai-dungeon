@@ -1,7 +1,8 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import {
   ActionIcon,
   AppShell,
+  Box,
   Burger,
   Center,
   Group,
@@ -17,6 +18,8 @@ import { useModifierHeld } from "./useModifierHeld";
 import type { Card } from "../../types/card";
 import type { SessionContext, ShellContext } from "../../types/session";
 import { NavBar } from "./NavBar";
+import { NavbarResizer } from "./NavbarResizer";
+import { useNavbarWidth } from "./useNavbarWidth";
 import { Terminal } from "../Terminal";
 import { SettingsModal } from "../settings";
 import { DungeonPanel } from "./DungeonPanel";
@@ -73,6 +76,19 @@ export function AppLayout({
   const [opened, { toggle }] = useDisclosure(true);
   const [settingsOpened, { open: openSettings, close: closeSettings }] = useDisclosure(false);
   const modifierPressed = useModifierHeld();
+
+  const { width: persistedWidth, setWidth, MIN, MAX } = useNavbarWidth();
+  const [liveWidth, setLiveWidth] = useState(persistedWidth);
+  // Track whether a drag is in progress so the effect below does not snap the
+  // width back to the persisted value while the user is still dragging (F-6).
+  const draggingRef = React.useRef(false);
+  // Sync liveWidth when persistedWidth changes (e.g. settings reloaded from disk),
+  // but only when no drag is in progress.
+  useEffect(() => {
+    if (!draggingRef.current) {
+      setLiveWidth(persistedWidth);
+    }
+  }, [persistedWidth]);
 
   const activate = (targetId: string | null) => {
     if (targetId !== null) {
@@ -143,7 +159,7 @@ export function AppLayout({
       <AppShell
         header={{ height: 60 }}
         navbar={{
-          width: 250,
+          width: liveWidth,
           breakpoint: 0,
           collapsed: { desktop: !opened },
         }}
@@ -179,16 +195,49 @@ export function AppLayout({
           </Group>
         </AppShell.Header>
 
-        <AppShell.Navbar p="md">
-          <NavBar
-            cards={cards}
-            onAddTerminalCard={onAddTerminalCard}
-            onAddDungeonCard={onAddDungeonCard}
-            onRemoveCard={onRemoveCard}
-            sessionContext={sessionContext}
-            shellContext={shellContext}
-            modifierPressed={modifierPressed}
-            activeId={activeId}
+        {/*
+         * p="md" is on the inner Box (not on AppShell.Navbar itself) so that
+         * the absolutely-positioned NavbarResizer can be anchored to right:0
+         * of the unpadded navbar element — which is exactly the sidebar/main
+         * visual boundary. If p="md" were on AppShell.Navbar, the resizer
+         * would sit ~16px inside the visual right edge (the padding-right).
+         * AppShell.Navbar does not set overflow:hidden in Mantine v9, so the
+         * absolutely-positioned resizer is not clipped.
+         */}
+        <AppShell.Navbar style={{ position: "relative" }}>
+          <Box p="md" style={{ height: "100%", overflowY: "auto" }}>
+            <NavBar
+              cards={cards}
+              onAddTerminalCard={onAddTerminalCard}
+              onAddDungeonCard={onAddDungeonCard}
+              onRemoveCard={onRemoveCard}
+              sessionContext={sessionContext}
+              shellContext={shellContext}
+              modifierPressed={modifierPressed}
+              activeId={activeId}
+            />
+          </Box>
+          {/*
+           * NavbarResizer is a sibling of the inner Box, positioned at right:0
+           * of the unpadded AppShell.Navbar. visible=opened ensures the
+           * handle is hidden and unfocusable when the sidebar is collapsed.
+           * onWidthChange updates liveWidth at frame rate (no persistence).
+           * onCommit calls setWidth which debounces persistence writes (F-1).
+           * draggingRef prevents mid-drag snap-back (F-6).
+           */}
+          <NavbarResizer
+            width={liveWidth}
+            onWidthChange={(next) => {
+              draggingRef.current = true;
+              setLiveWidth(next);
+            }}
+            onCommit={(final) => {
+              draggingRef.current = false;
+              setWidth(final);
+            }}
+            min={MIN}
+            max={MAX}
+            visible={opened}
           />
         </AppShell.Navbar>
 

@@ -1,3 +1,11 @@
+// Hoist the updateSettings spy and a mutable navbarWidth holder so integration
+// tests can assert on persistence calls and simulate settings changes.
+// Both are initialised before vi.mock factories execute.
+const { mockUpdateSettings, mockNavbarWidthHolder } = vi.hoisted(() => ({
+  mockUpdateSettings: vi.fn().mockResolvedValue(undefined),
+  mockNavbarWidthHolder: { current: 250 },
+}));
+
 vi.mock("@xterm/xterm", () => {
   // Each instance gets its own fresh spies so tests can introspect per-instance
   // writeln calls across multiple mounts. The `_vi` reference satisfies the
@@ -22,14 +30,23 @@ vi.mock("@xterm/xterm", () => {
 // Mock SettingsContext so AppLayout (which renders SettingsModal) can call
 // useSettings() without a real provider or Tauri fs plugin. The default
 // settings match DEFAULT_SETTINGS so all existing tests are unaffected.
+// Mock SettingsContext so AppLayout (which renders SettingsModal and calls
+// useNavbarWidth) can call useSettings() without a real provider or Tauri fs
+// plugin. The default settings match DEFAULT_SETTINGS so all existing tests are
+// unaffected. mockUpdateSettings is a hoisted shared spy so integration tests
+// can assert on persistence calls.
 vi.mock("../../settings/SettingsContext", () => ({
+  // navbarWidth is read from mockNavbarWidthHolder.current so individual tests
+  // can mutate it (and trigger a re-render) to simulate an external settings
+  // change without reconstructing the entire mock module.
   useSettings: () => ({
     settings: {
       version: 1,
       colorScheme: "auto",
       terminal: { fontSize: 13 },
+      layout: { navbarWidth: mockNavbarWidthHolder.current },
     },
-    updateSettings: vi.fn().mockResolvedValue(undefined),
+    updateSettings: mockUpdateSettings,
     saveError: null,
   }),
 }));
@@ -75,7 +92,7 @@ vi.mock("./useModifierHeld", async (importOriginal) => {
 });
 
 import React from "react";
-import { act, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test-utils/render";
 import { AppLayout } from "./AppLayout";
@@ -894,5 +911,143 @@ describe("AppLayout — terminal loading indicator", () => {
     expect(screen.queryByTestId("terminal-loading-overlay")).toBeNull();
     // The dungeon placeholder is present.
     expect(screen.getByTestId("dungeon-placeholder-D")).toBeInTheDocument();
+  });
+});
+
+// ── NavbarResizer integration tests ───────────────────────────────────────────
+
+describe("AppLayout — navbar resizer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearSpawnChainForTesting();
+    (invoke as unknown as AnyMock).mockResolvedValue(1);
+    // Reset to the default value so tests that mutate it start from a known baseline.
+    mockNavbarWidthHolder.current = 250;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    }) as unknown as typeof ResizeObserver;
+    // Stub pointer capture APIs — jsdom does not implement them.
+    window.HTMLElement.prototype.setPointerCapture = vi.fn();
+    window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  function makeLayoutProps() {
+    return {
+      cards: [] as { id: string; type: "terminal" | "dungeon" }[],
+      onAddTerminalCard: vi.fn(),
+      onAddDungeonCard: vi.fn(),
+      onRemoveCard: vi.fn(),
+      activeId: null as string | null,
+      onActiveIdChange: vi.fn(),
+      sessionContext: {},
+      onSessionContextChange: vi.fn(),
+      shellContext: {},
+      onShellContextChange: vi.fn(),
+      readyCardIds: new Set<string>(),
+      onCardReady: vi.fn(),
+    };
+  }
+
+  function renderLayout() {
+    const props = makeLayoutProps();
+    return renderWithProviders(<AppLayout {...props} />);
+  }
+
+  it("separator with aria-label='Resize sidebar' is present when navbar is opened (initial state)", () => {
+    renderLayout();
+    // useDisclosure(true) means sidebar starts opened → resizer is visible.
+    const sep = screen.getByRole("separator", { name: /resize sidebar/i });
+    expect(sep).toBeInTheDocument();
+    expect(sep).toHaveAttribute("aria-orientation", "vertical");
+  });
+
+  it("separator is not in the accessibility tree after clicking the Burger toggle to collapse", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+
+    // Initially visible
+    expect(screen.getByRole("separator", { name: /resize sidebar/i })).toBeInTheDocument();
+
+    // Click Burger to collapse the sidebar
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /toggle navigation/i }));
+    });
+
+    // Separator should be gone from the a11y tree (display:none)
+    expect(screen.queryByRole("separator", { name: /resize sidebar/i })).toBeNull();
+  });
+
+  it("dragging the separator calls updateSettings with an updated layout.navbarWidth", async () => {
+    renderLayout();
+    const sep = screen.getByRole("separator", { name: /resize sidebar/i });
+
+    // Simulate drag: pointerDown at 250, pointerUp at 350 (delta +100 → width 350).
+    act(() => {
+      fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: 350, buttons: 1 });
+      fireEvent.pointerUp(sep, { pointerId: 1, clientX: 350 });
+    });
+
+    await vi.waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ layout: { navbarWidth: 350 } }),
+      );
+    });
+  });
+
+  it("pressing ArrowRight while separator has focus calls updateSettings with increased navbarWidth", async () => {
+    renderLayout();
+    const sep = screen.getByRole("separator", { name: /resize sidebar/i });
+
+    act(() => {
+      sep.focus();
+      const event = new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true });
+      sep.dispatchEvent(event);
+    });
+
+    await vi.waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ layout: { navbarWidth: 260 } }),
+      );
+    });
+  });
+
+  it("draggingRef guard prevents snap-back when persistedWidth changes mid-drag", async () => {
+    const props = makeLayoutProps();
+    const { rerender } = renderWithProviders(<AppLayout {...props} />);
+    const sep = screen.getByRole("separator", { name: /resize sidebar/i });
+
+    // Initial width from mockNavbarWidthHolder.current (250)
+    expect(sep).toHaveAttribute("aria-valuenow", "250");
+
+    // Start a drag: pointerDown at x=250, then move to x=350 → liveWidth becomes 350
+    act(() => {
+      fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+      fireEvent.pointerMove(sep, { pointerId: 1, clientX: 350, buttons: 1 });
+    });
+
+    // liveWidth should now reflect the drag position (350)
+    expect(sep).toHaveAttribute("aria-valuenow", "350");
+
+    // Simulate an external settings change arriving mid-drag
+    mockNavbarWidthHolder.current = 200;
+    act(() => {
+      rerender(<AppLayout {...props} />);
+    });
+
+    // The draggingRef guard must prevent the snap-back: liveWidth stays at 350
+    expect(sep).toHaveAttribute("aria-valuenow", "350");
+
+    // End the drag
+    act(() => {
+      fireEvent.pointerUp(sep, { pointerId: 1, clientX: 350 });
+    });
+
+    // The final drag value (350) must be committed via updateSettings
+    await vi.waitFor(() => {
+      expect(mockUpdateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ layout: { navbarWidth: 350 } }),
+      );
+    });
   });
 });
