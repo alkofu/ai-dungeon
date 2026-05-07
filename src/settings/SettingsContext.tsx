@@ -49,6 +49,9 @@ function deepMergeSettings(current: Settings, patch: DeepPartial<Settings>): Set
     // is patched.
     terminal:
       patch.terminal !== undefined ? { ...current.terminal, ...patch.terminal } : current.terminal,
+    // Merge the layout sub-object so that future fields under layout are
+    // preserved when only navbarWidth is patched.
+    layout: patch.layout !== undefined ? { ...current.layout, ...patch.layout } : current.layout,
   };
 }
 

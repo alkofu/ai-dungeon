@@ -57,6 +57,98 @@ describe("loadSettings", () => {
   });
 });
 
+describe("isValidSettings — layout field", () => {
+  afterEach(() => {
+    fsMock.reset();
+  });
+
+  it("accepts a settings file without a layout field (backward compat)", async () => {
+    const legacySettings = {
+      version: 1,
+      colorScheme: "dark",
+      terminal: { fontSize: 14 },
+    };
+    installFsMock({ initialFile: JSON.stringify(legacySettings) });
+    const { loadSettings } = await import("./persistence");
+    const result = await loadSettings();
+    // Validation must pass and the object is returned as-is (no layout field).
+    expect(result.version).toBe(1);
+    expect(result.colorScheme).toBe("dark");
+    expect(result.terminal.fontSize).toBe(14);
+  });
+
+  it("accepts a settings file with layout.navbarWidth set to a valid number", async () => {
+    const settings = {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+      layout: { navbarWidth: 400 },
+    };
+    installFsMock({ initialFile: JSON.stringify(settings) });
+    const { loadSettings } = await import("./persistence");
+    const result = await loadSettings();
+    expect(result.layout?.navbarWidth).toBe(400);
+  });
+
+  it("rejects a settings file with layout.navbarWidth set to a non-number string", async () => {
+    const badSettings = {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+      layout: { navbarWidth: "abc" },
+    };
+    installFsMock({ initialFile: JSON.stringify(badSettings) });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadSettings } = await import("./persistence");
+    const result = await loadSettings();
+    expect(result).toEqual(DEFAULT_SETTINGS);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("rejects a settings file where layout is a non-null non-object (e.g. a string)", async () => {
+    const badSettings = {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+      layout: "bad",
+    };
+    installFsMock({ initialFile: JSON.stringify(badSettings) });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadSettings } = await import("./persistence");
+    const result = await loadSettings();
+    expect(result).toEqual(DEFAULT_SETTINGS);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("accepts a settings file with layout.navbarWidth of 0 (clamping is consumer's job)", async () => {
+    const settings = {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+      layout: { navbarWidth: 0 },
+    };
+    installFsMock({ initialFile: JSON.stringify(settings) });
+    const { loadSettings } = await import("./persistence");
+    const result = await loadSettings();
+    expect(result.layout?.navbarWidth).toBe(0);
+  });
+
+  it("accepts a settings file with layout.navbarWidth of a negative number", async () => {
+    const settings = {
+      version: 1,
+      colorScheme: "auto",
+      terminal: { fontSize: 13 },
+      layout: { navbarWidth: -50 },
+    };
+    installFsMock({ initialFile: JSON.stringify(settings) });
+    const { loadSettings } = await import("./persistence");
+    const result = await loadSettings();
+    expect(result.layout?.navbarWidth).toBe(-50);
+  });
+});
+
 describe("saveSettings", () => {
   afterEach(() => {
     fsMock.reset();

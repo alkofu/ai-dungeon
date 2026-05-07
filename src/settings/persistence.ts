@@ -15,6 +15,15 @@ function isValidSettings(parsed: unknown): parsed is Settings {
   const t = terminal as Record<string, unknown>;
   if (typeof t["fontSize"] !== "number" || !isFinite(t["fontSize"]) || t["fontSize"] <= 0)
     return false;
+  // layout is optional — absent means "use default"; present must be a non-null object.
+  if (p["layout"] !== undefined) {
+    if (typeof p["layout"] !== "object" || p["layout"] === null) return false;
+    const l = p["layout"] as Record<string, unknown>;
+    // navbarWidth is optional — if present must be a finite number (clamping is the consumer's job).
+    if (l["navbarWidth"] !== undefined) {
+      if (typeof l["navbarWidth"] !== "number" || !isFinite(l["navbarWidth"])) return false;
+    }
+  }
   return true;
 }
 
