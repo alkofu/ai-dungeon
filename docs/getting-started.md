@@ -50,3 +50,31 @@ For the Rust backend (`src-tauri/`), the crates enforce `#![deny(unused)]`, so a
 | `cargo fmt --manifest-path src-tauri/Cargo.toml`                                 | Auto-format Rust source               |
 
 These checks are also enforced by the `rust` CI job on every pull request.
+
+### Previewing a worktree
+
+Worktrees under `.worktrees/<name>/` can be previewed in isolation without manually `cd`-ing into them — a single command from the repo root handles the full workflow.
+
+```sh
+pnpm dev:worktree <worktree-name>
+```
+
+Equivalently, you can invoke the script directly:
+
+```sh
+bash scripts/dev-worktree.sh <worktree-name>
+```
+
+The script assumes worktrees live under `.worktrees/<name>/` — the project's standard git worktree location — so future contributors understand the convention is intentional.
+
+What the script does, in order:
+
+- Validates that the worktree directory exists under `.worktrees/`.
+- Checks that port 1420 is free (Tauri's Vite dev server always binds to port 1420; only one preview can run at a time — this is intentional and matches the upstream Vite/Tauri convention).
+- Runs `pnpm install --prefer-offline` inside the worktree.
+- `exec`s `pnpm tauri dev`, replacing the shell process so Ctrl-C tears down Tauri cleanly.
+
+**Common errors:**
+
+- `Error: worktree '<name>' not found at ...` — the worktree directory does not exist. Run `git worktree list` to see which worktrees are currently checked out.
+- `Error: port 1420 is already in use.` — another `pnpm tauri dev` instance (or some other process) is bound to the port. Run `lsof -i :1420` to identify it and stop it before starting a new preview.

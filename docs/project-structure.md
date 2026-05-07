@@ -49,6 +49,8 @@ ai-dungeon/
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+├── scripts/
+│   └── dev-worktree.sh   # Worktree dev launcher — validates the named worktree under `.worktrees/`, checks port 1420, runs `pnpm install --prefer-offline`, then `exec`s `pnpm tauri dev`. Invoked via `pnpm dev:worktree <name>`.
 ├── index.html
 ├── vite.config.ts
 ├── tsconfig.json

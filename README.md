@@ -62,6 +62,8 @@ pnpm tauri dev
 
 This installs dependencies and launches the app in development mode. You will need Rust, Node.js v18+, and pnpm installed first — see [docs/getting-started.md](docs/getting-started.md) for full prerequisites and setup instructions.
 
+To preview a specific git worktree without manually `cd`-ing into it, use `pnpm dev:worktree <worktree-name>` — see [Previewing a worktree](docs/getting-started.md#previewing-a-worktree) for details.
+
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) — prerequisites, development workflow, and code quality tooling.
