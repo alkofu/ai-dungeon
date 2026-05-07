@@ -20,21 +20,23 @@ interface SessionCardProps {
   sessionContext?: SessionContext;
   /** OSC 7/7337 (shell) context — used when no session context is present. */
   shellContext?: ShellContext;
-  /** When true, shows a keyboard-shortcut overlay label (⌘N / Ctrl+N). Optional; defaults to false. */
+  /** @deprecated this prop is no longer consumed; the shortcut chip is now persistent. Scheduled for removal once NavBar/AppLayout plumbing is also cleaned up in a follow-up PR. */
   modifierPressed?: boolean;
-  /** 1-based position of this card in the NavBar cards array. Overlay is only shown for positions 1–9. */
+  /** 1-based position of this card in the NavBar cards array. Shortcut chip is shown for positions 1–9. */
   position?: number;
   /** When true, applies the active visual treatment — dark background and bold typography. Defaults to false. */
   active?: boolean;
   /** Optional status subtitle rendered below the slug. When undefined the line is omitted entirely. */
   status?: string;
+  /** When true, renders the NEEDS REVIEW label and orange accent. Explicit prop wins; otherwise derived from sessionContext.needsReview. */
+  needsReview?: boolean;
 }
 
 /**
  * Returns the last 1-2 path segments of a POSIX path (forward-slash only).
  * Trailing slashes are stripped before splitting.
  */
-function lastSegments(path: string): string {
+export function lastSegments(path: string): string {
   const trimmed = path.replace(/\/+$/, "");
   const parts = trimmed.split("/").filter(Boolean);
   if (parts.length >= 2) {
@@ -48,10 +50,10 @@ export function SessionCard({
   onRemove,
   sessionContext,
   shellContext,
-  modifierPressed = false,
   position = undefined,
   active = false,
   status,
+  needsReview: needsReviewProp,
 }: SessionCardProps) {
   // Intentional: OSC 7337 clear does not erase branch/repo on a session-bound card.
   // SessionContext is authoritative over transient shell drift.
@@ -60,36 +62,106 @@ export function SessionCard({
   const prNumber = isSessionContext(meta) ? meta.prNumber : undefined;
   const issueNumber = isSessionContext(meta) ? meta.issueNumber : undefined;
 
-  // Show the shortcut overlay only when modifier is held, position is valid (1–9).
-  const showShortcut =
-    modifierPressed === true && typeof position === "number" && position >= 1 && position <= 9;
+  // Explicit prop wins; otherwise derive from sessionContext when available.
+  const needsReview =
+    needsReviewProp !== undefined
+      ? needsReviewProp
+      : isSessionContext(meta)
+        ? (meta.needsReview ?? false)
+        : false;
+
+  const slug = isSessionContext(meta) ? meta.slug : "(shell)";
+
+  // Subtitle: "repo • branch" with no separator when one segment is absent.
+  const subtitleParts = [meta.repo?.name, meta.branch].filter(Boolean);
+
+  const hasBadges = prNumber != null || issueNumber != null;
 
   return (
-    // Mantine Tooltip cloneElement-s the wrapped Stack to inject a ref and hover handlers
-    // (onMouseEnter, onMouseLeave, onPointerDown, onPointerEnter). Because opened is
-    // controlled, useDismiss is disabled and these injected handlers are inert — tooltip
-    // visibility is driven solely by the opened prop.
-    // withinPortal={true} (the Mantine default) makes the floating panel escape
-    // Tabs.Tab's overflow:hidden clipping boundary set in NavBar.tsx.
-    <Tooltip
-      opened={showShortcut}
-      label={`${SHORTCUT_GLYPH}${String(position)}`}
-      position="right"
-      withArrow
-      withinPortal={true}
+    <Box
+      data-active={active ? "true" : "false"}
+      data-needs-review={needsReview ? "true" : "false"}
+      style={{
+        borderLeft: `4px solid ${needsReview ? "var(--mantine-color-orange-6)" : "var(--mantine-color-blue-5)"}`,
+        borderRadius: "var(--mantine-radius-md)",
+        padding: "var(--mantine-spacing-md)",
+        backgroundColor: active ? "var(--mantine-color-blue-9)" : "var(--mantine-color-dark-7)",
+      }}
     >
-      <Box
-        bg={active ? "dark.7" : "transparent"}
-        p="xs"
-        style={{ borderRadius: "var(--mantine-radius-sm)" }}
-        data-active={active ? "true" : "false"}
-      >
-        <Stack gap="xs">
-          {/* Row 1: slug + close button */}
-          <Group justify="space-between" wrap="nowrap">
-            <Text size="sm" fw={active ? 700 : 500}>
-              {isSessionContext(meta) ? meta.slug : "(shell)"}
+      <Stack gap="xs">
+        {/* NEEDS REVIEW label */}
+        {needsReview && (
+          <Group gap={6} align="center">
+            <Box w={6} h={6} bg="orange.6" style={{ borderRadius: "50%" }} />
+            <Text size="xs" fw={700} c="orange.6" tt="uppercase" lts="0.05em">
+              NEEDS REVIEW
             </Text>
+          </Group>
+        )}
+
+        {/* Header row: title + shortcut chip + close button */}
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
+          <Stack gap={2}>
+            <Text size="md" fw={700} c="white">
+              {slug}
+            </Text>
+            {subtitleParts.length > 0 && (
+              <Text size="xs" fs="italic" c="dimmed">
+                {subtitleParts.map((part, i) => {
+                  const isRepo = i === 0 && meta.repo != null && part === meta.repo.name;
+                  const isBranch = part === meta.branch && meta.branch != null;
+
+                  if (isRepo) {
+                    return (
+                      <span key="repo">
+                        <Tooltip
+                          label={`${meta.repo!.owner}/${meta.repo!.name}`}
+                          withinPortal={false}
+                        >
+                          <span>{part}</span>
+                        </Tooltip>
+                        {subtitleParts.length > 1 ? " • " : ""}
+                      </span>
+                    );
+                  }
+                  if (isBranch && meta.workingDirectory) {
+                    return (
+                      <Tooltip key="branch" label={meta.workingDirectory} withinPortal={false}>
+                        <span>{part}</span>
+                      </Tooltip>
+                    );
+                  }
+                  return <span key={`part-${String(i)}`}>{part}</span>;
+                })}
+              </Text>
+            )}
+            {status != null && (
+              <Text size="xs" c="dimmed">
+                {status}
+              </Text>
+            )}
+          </Stack>
+          <Group gap="xs">
+            {/* Persistent shortcut chip for positions 1–9 */}
+            {position != null && position >= 1 && position <= 9 && (
+              <Box
+                px={8}
+                py={2}
+                style={{
+                  backgroundColor: "var(--mantine-color-gray-2)",
+                  color: "var(--mantine-color-dark-9)",
+                  borderRadius: "var(--mantine-radius-sm)",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 2,
+                }}
+              >
+                {SHORTCUT_GLYPH}
+                {String(position)}
+              </Box>
+            )}
             {/* component="div" avoids nesting <button> inside <button>
               (Tabs.Tab renders as <button>; ActionIcon renders as <button> by default,
               which is invalid HTML). Using a div with role="button" keeps the
@@ -116,79 +188,36 @@ export function SessionCard({
               ×
             </ActionIcon>
           </Group>
+        </Group>
 
-          {status != null && (
-            <Text size="xs" c={active ? "gray.4" : "dimmed"}>
-              {status}
-            </Text>
-          )}
-
-          {/* Row 2: [repo : branch •] path-tail
-            repo and branch are optional — cleared by empty OSC 7337.
-            When absent, their segments (including the : and • separators) are omitted. */}
+        {/* Badge row: only when at least one of prNumber, issueNumber is defined */}
+        {hasBadges && (
           <Group gap="xs" wrap="nowrap">
-            {meta.repo != null && (
-              <>
-                <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
-                  <Text size="xs" c={active ? "white" : "dimmed"} truncate>
-                    {meta.repo.name}
-                  </Text>
-                </Tooltip>
-                <Text size="xs" c={active ? "white" : "dimmed"}>
-                  :
-                </Text>
-              </>
-            )}
-            {meta.branch != null && (
-              <>
-                <Text size="xs" c={active ? "white" : "dimmed"} truncate>
-                  {meta.branch}
-                </Text>
-                <Text size="xs" c={active ? "white" : "dimmed"}>
-                  •
-                </Text>
-              </>
-            )}
-            <Tooltip label={meta.workingDirectory} withinPortal={false}>
-              <Text size="xs" c={active ? "white" : "dimmed"} truncate>
-                {lastSegments(meta.workingDirectory)}
-              </Text>
-            </Tooltip>
-          </Group>
-
-          {/* Row 3: optional PR badge, optional Issue badge, placeholder badge */}
-          <Box
-            style={{
-              borderTop: "1px solid var(--mantine-color-default-border)",
-              paddingTop: "var(--mantine-spacing-xs)",
-            }}
-          />
-          <Group gap="xs" wrap="nowrap" opacity={0.6}>
             {prNumber != null && (
               <Badge
-                size="xs"
-                variant="light"
-                leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
+                size="sm"
+                variant="filled"
+                color={needsReview ? "orange" : "blue"}
+                radius="sm"
+                leftSection={<IconGitPullRequest size={12} role="img" aria-label="Pull request" />}
               >
-                {`PR #${prNumber}`}
+                {`#${prNumber}`}
               </Badge>
             )}
             {issueNumber != null && (
               <Badge
-                size="xs"
-                variant="light"
-                leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
+                size="sm"
+                variant="filled"
+                color={needsReview ? "orange" : "blue"}
+                radius="sm"
+                leftSection={<IconCircleDot size={12} role="img" aria-label="Issue" />}
               >
                 {`#${issueNumber}`}
               </Badge>
             )}
-            {/* No leftSection: placeholder badge intentionally renders no icon. */}
-            <Badge size="xs" variant="light">
-              —
-            </Badge>
           </Group>
-        </Stack>
-      </Box>
-    </Tooltip>
+        )}
+      </Stack>
+    </Box>
   );
 }

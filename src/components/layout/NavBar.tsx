@@ -82,6 +82,7 @@ export function NavBar({
                   modifierPressed={modifierPressed}
                   position={position}
                   active={isActive}
+                  needsReview={sessionContext[card.id]?.needsReview ?? false}
                 />
               </Tabs.Tab>
             );

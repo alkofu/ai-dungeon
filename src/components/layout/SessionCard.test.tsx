@@ -26,6 +26,19 @@ function renderInTabs(cardId: string, onRemove = vi.fn()) {
   );
 }
 
+/**
+ * Returns the closest `.mantine-Badge-root` ancestor of the icon element
+ * with the given aria-label. Throws if the icon is not found.
+ */
+function getBadgeContainingIcon(ariaLabel: string): Element {
+  const icon = screen.getByRole("img", { name: ariaLabel });
+  const badge = icon.closest(".mantine-Badge-root");
+  if (!badge) {
+    throw new Error(`No .mantine-Badge-root ancestor found for icon "${ariaLabel}"`);
+  }
+  return badge;
+}
+
 describe("SessionCard", () => {
   // Use fixture 0 (slug: "refactor-auth-flow", repo: acme-corp/ai-dungeon,
   // workingDirectory: "~/projects/ai-dungeon", prNumber: 42, issueNumber: 17)
@@ -104,38 +117,37 @@ describe("SessionCard", () => {
     expect(tooltip).toHaveTextContent(`${meta.repo!.owner}/${meta.repo!.name}`);
   });
 
-  it("7. tooltip on working-directory tail shows the full path", async () => {
+  it("7. tooltip on branch text shows the full working-directory path", async () => {
     const user = userEvent.setup();
-    // Use fixture 1: full path "/home/user/work/backend-service/src/handlers"
-    // visible tail: "src/handlers"
+    // Use fixture 1: branch "fix/terminal-resize", full path "/home/user/work/backend-service/src/handlers"
     renderInTabs(CARD_ID_F1);
 
-    // The visible tail differs from the full path — hover the tail text
-    const trigger = screen.getByText("src/handlers");
+    const trigger = screen.getByText(SESSION_CONTEXT_FIXTURES[1].branch!);
     await user.hover(trigger);
 
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent(SESSION_CONTEXT_FIXTURES[1].workingDirectory);
   });
 
-  it("8. working-directory visible text is last 1-2 segments", () => {
-    // Fixture 1: "/home/user/work/backend-service/src/handlers" → "src/handlers"
+  it("8. working-directory text is no longer rendered in the visible DOM", () => {
+    // Fixture 1: "/home/user/work/backend-service/src/handlers" — the path tail ("src/handlers")
+    // must NOT appear as visible text; the full path must also not appear.
     renderInTabs(CARD_ID_F1);
-    expect(screen.getByText("src/handlers")).toBeInTheDocument();
+    expect(screen.queryByText("src/handlers")).toBeNull();
     expect(screen.queryByText(SESSION_CONTEXT_FIXTURES[1].workingDirectory)).toBeNull();
   });
 
   it("9a. PR badge is omitted entirely when prNumber is undefined", () => {
     // Fixture 2 has no prNumber — badge and icon must both be absent
     renderInTabs(CARD_ID_F2);
-    expect(screen.queryByText(/^PR /)).toBeNull();
     expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
   });
 
-  it("9b. PR badge shows 'PR #n' when prNumber is defined", () => {
+  it("9b. PR badge shows '#n' when prNumber is defined", () => {
     // Fixture 0 has prNumber: 42
     renderInTabs(CARD_ID_F0);
-    expect(screen.getByText("PR #42")).toBeInTheDocument();
+    const badge = getBadgeContainingIcon("Pull request");
+    expect(badge.textContent).toContain("#42");
   });
 
   it("9c. PR badge renders the pull-request icon when prNumber is defined", () => {
@@ -145,10 +157,8 @@ describe("SessionCard", () => {
   });
 
   it("10a. Issue badge is omitted entirely when issueNumber is undefined", () => {
-    // Fixture 1 has no issueNumber — badge and icon must both be absent
+    // Fixture 1 has no issueNumber — icon must be absent
     renderInTabs(CARD_ID_F1);
-    expect(screen.queryByText(/^Issue /)).toBeNull();
-    expect(screen.queryByText(/^#\d+$/)).toBeNull();
     expect(screen.queryByRole("img", { name: "Issue" })).toBeNull();
   });
 
@@ -164,22 +174,6 @@ describe("SessionCard", () => {
     expect(screen.getByRole("img", { name: "Issue" })).toBeInTheDocument();
   });
 
-  it("11. third placeholder badge with text '—' is always present", () => {
-    renderInTabs(CARD_ID_F3);
-    // Fixture 3 has neither PR nor Issue, so only the standalone '—' badge remains
-    expect(screen.getByText("—")).toBeInTheDocument();
-  });
-
-  it("11b. placeholder badge renders no icon", () => {
-    // Fixture 3 has neither PR nor Issue — only the placeholder badge remains
-    const { container } = renderInTabs(CARD_ID_F3);
-    const badges = container.querySelectorAll(".mantine-Badge-root");
-    expect(badges).toHaveLength(1);
-    const firstBadge = badges[0];
-    expect(firstBadge.querySelectorAll('[role="img"]')).toHaveLength(0);
-    expect(firstBadge.textContent).toContain("—");
-  });
-
   it("11c. PR and Issue badges are both absent when fixture has neither prNumber nor issueNumber", () => {
     renderInTabs(CARD_ID_F3);
     expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
@@ -190,11 +184,11 @@ describe("SessionCard", () => {
   it("11d. only PR badge renders when issueNumber is absent (fixture 1)", () => {
     // Fixture 1: prNumber=7, issueNumber=undefined
     const { container } = renderInTabs(CARD_ID_F1);
-    expect(screen.getByText("PR #7")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
+    const badge = getBadgeContainingIcon("Pull request");
+    expect(badge.textContent).toContain("#7");
     expect(screen.queryByRole("img", { name: "Issue" })).toBeNull();
     const badges = container.querySelectorAll(".mantine-Badge-root");
-    expect(badges).toHaveLength(2);
+    expect(badges).toHaveLength(1);
   });
 
   it("11e. only Issue badge renders when prNumber is absent (fixture 2)", () => {
@@ -204,63 +198,7 @@ describe("SessionCard", () => {
     expect(screen.getByRole("img", { name: "Issue" })).toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
     const badges = container.querySelectorAll(".mantine-Badge-root");
-    expect(badges).toHaveLength(2);
-  });
-
-  // ── Shortcut tooltip overlay tests ───────────────────────────────────────────
-
-  describe("shortcut tooltip overlay", () => {
-    it("modifierPressed=true + position=2: tooltip label ⌘2 is in the DOM", async () => {
-      renderWithProviders(
-        <Tabs value={null} onChange={() => {}} orientation="vertical">
-          <Tabs.Tab value="card-2">
-            <SessionCard cardId="card-2" onRemove={vi.fn()} modifierPressed={true} position={2} />
-          </Tabs.Tab>
-        </Tabs>,
-      );
-
-      // Tooltip uses withinPortal={true}, so the label is in document.body portal
-      expect(screen.getByText("⌘2")).toBeInTheDocument();
-    });
-
-    it("modifierPressed=false + position=2: tooltip label ⌘2 is absent", () => {
-      renderWithProviders(
-        <Tabs value={null} onChange={() => {}} orientation="vertical">
-          <Tabs.Tab value="card-2">
-            <SessionCard cardId="card-2" onRemove={vi.fn()} modifierPressed={false} position={2} />
-          </Tabs.Tab>
-        </Tabs>,
-      );
-
-      expect(screen.queryByText("⌘2")).toBeNull();
-    });
-
-    it("modifierPressed=true + position=10: tooltip label ⌘10 is absent (position > 9 guard)", () => {
-      renderWithProviders(
-        <Tabs value={null} onChange={() => {}} orientation="vertical">
-          <Tabs.Tab value="card-10">
-            <SessionCard cardId="card-10" onRemove={vi.fn()} modifierPressed={true} position={10} />
-          </Tabs.Tab>
-        </Tabs>,
-      );
-
-      expect(screen.queryByText("⌘10")).toBeNull();
-    });
-
-    it("existing tests are unaffected: new props are optional with safe defaults", () => {
-      renderWithProviders(
-        <Tabs value={null} onChange={() => {}} orientation="vertical">
-          <Tabs.Tab value={CARD_ID_F0}>
-            <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} />
-          </Tabs.Tab>
-        </Tabs>,
-      );
-
-      // No tooltip label visible
-      expect(screen.queryByText("⌘1")).toBeNull();
-      // Card content still renders
-      expect(screen.getByText(SESSION_CONTEXT_FIXTURES[0].slug)).toBeInTheDocument();
-    });
+    expect(badges).toHaveLength(1);
   });
 
   describe("active visual state", () => {
@@ -475,5 +413,161 @@ describe("SessionCard", () => {
       </Tabs>,
     );
     expect(screen.getByText(liveContext.repo!.name)).toBeInTheDocument();
+  });
+
+  // ── Persistent shortcut chip tests (Group a) ─────────────────────────────
+
+  it("renders the persistent shortcut chip when position is 1–9 regardless of modifierPressed", () => {
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="card-3">
+          <SessionCard cardId="card-3" onRemove={vi.fn()} position={3} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("⌘3")).toBeInTheDocument();
+  });
+
+  it("does not render the shortcut chip when position is undefined or > 9", () => {
+    // Case 1: no position
+    const { unmount } = renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="card-x">
+          <SessionCard cardId="card-x" onRemove={vi.fn()} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.queryByText(/^⌘/)).toBeNull();
+    unmount();
+
+    // Case 2: position > 9
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="card-10">
+          <SessionCard cardId="card-10" onRemove={vi.fn()} position={10} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.queryByText(/^⌘/)).toBeNull();
+  });
+
+  it("renders the NEEDS REVIEW label when needsReview prop is true", () => {
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} needsReview={true} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("NEEDS REVIEW")).toBeInTheDocument();
+  });
+
+  it("does not render the NEEDS REVIEW label when needsReview is false or absent", () => {
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} needsReview={false} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.queryByText("NEEDS REVIEW")).toBeNull();
+  });
+
+  it("applies orange-themed left-border accent when needsReview is true", () => {
+    const { container: containerTrue } = renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} needsReview={true} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(containerTrue.querySelector('[data-needs-review="true"]')).not.toBeNull();
+
+    const { container: containerFalse } = renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} needsReview={false} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(containerFalse.querySelector('[data-needs-review="false"]')).not.toBeNull();
+  });
+
+  it("prop overrides context for needsReview", () => {
+    const sessionCtx = {
+      sessionTs: "20260425-120000",
+      slug: "override-test",
+      workingDirectory: "/some/path",
+      needsReview: false,
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="override-card">
+          <SessionCard
+            cardId="override-card"
+            onRemove={vi.fn()}
+            sessionContext={sessionCtx}
+            needsReview={true}
+          />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("NEEDS REVIEW")).toBeInTheDocument();
+  });
+
+  it("derives needsReview from sessionContext when prop is omitted", () => {
+    const sessionCtx = {
+      sessionTs: "20260425-120000",
+      slug: "derive-test",
+      workingDirectory: "/some/path",
+      needsReview: true,
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="derive-card">
+          <SessionCard cardId="derive-card" onRemove={vi.fn()} sessionContext={sessionCtx} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("NEEDS REVIEW")).toBeInTheDocument();
+  });
+
+  it("subtitle omits separator when repo is absent", () => {
+    const sessionCtx = {
+      sessionTs: "20260425-120000",
+      slug: "no-repo-slug",
+      workingDirectory: "/some/path",
+      branch: "feat/x",
+      repo: undefined,
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="no-repo-card">
+          <SessionCard cardId="no-repo-card" onRemove={vi.fn()} sessionContext={sessionCtx} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.getByText("feat/x")).toBeInTheDocument();
+    expect(screen.queryByText(/—/)).toBeNull();
+  });
+
+  it("subtitle is empty when both repo and branch are absent", () => {
+    const sessionCtx = {
+      sessionTs: "20260425-120000",
+      slug: "no-repo-no-branch",
+      workingDirectory: "/some/path",
+      repo: undefined,
+      branch: undefined,
+    };
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="empty-sub-card">
+          <SessionCard cardId="empty-sub-card" onRemove={vi.fn()} sessionContext={sessionCtx} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.queryByText(/—/)).toBeNull();
+    // Slug must still render
+    expect(screen.getByText("no-repo-no-branch")).toBeInTheDocument();
   });
 });

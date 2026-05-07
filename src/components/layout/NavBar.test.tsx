@@ -255,9 +255,9 @@ describe("NavBar", () => {
     expect(innerSpan).toHaveStyle({ whiteSpace: "normal" });
   });
 
-  // ── Shortcut tooltip overlay tests ───────────────────────────────────────────
+  // ── Shortcut chip tests ───────────────────────────────────────────────────
 
-  describe("shortcut tooltip overlay via modifierPressed prop", () => {
+  describe("persistent shortcut chip", () => {
     it("3 cards + modifierPressed=true: DOM contains ⌘1, ⌘2, ⌘3", () => {
       renderNavBar(
         <NavBar
@@ -272,14 +272,12 @@ describe("NavBar", () => {
         />,
       );
 
-      // Tooltips use withinPortal={true}, so labels appear in document.body portal.
-      // Use document-scoped screen.getByText (not within(navbar)) to find them.
       expect(screen.getByText("⌘1")).toBeInTheDocument();
       expect(screen.getByText("⌘2")).toBeInTheDocument();
       expect(screen.getByText("⌘3")).toBeInTheDocument();
     });
 
-    it("3 cards + modifierPressed=false: no ⌘N text in DOM", () => {
+    it("3 cards: ⌘1, ⌘2, ⌘3 are present regardless of modifierPressed", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(3)}
@@ -293,12 +291,12 @@ describe("NavBar", () => {
         />,
       );
 
-      expect(screen.queryByText("⌘1")).toBeNull();
-      expect(screen.queryByText("⌘2")).toBeNull();
-      expect(screen.queryByText("⌘3")).toBeNull();
+      expect(screen.getByText("⌘1")).toBeInTheDocument();
+      expect(screen.getByText("⌘2")).toBeInTheDocument();
+      expect(screen.getByText("⌘3")).toBeInTheDocument();
     });
 
-    it("11 cards + modifierPressed=true: ⌘1–⌘9 present, ⌘10 absent; card 10 remove button still in DOM", () => {
+    it("11 cards: ⌘1–⌘9 present, ⌘10 absent; card 10 remove button still in DOM", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(11)}
@@ -307,22 +305,54 @@ describe("NavBar", () => {
           onRemoveCard={vi.fn()}
           sessionContext={{}}
           shellContext={{}}
-          modifierPressed={true}
           activeId={null}
         />,
       );
 
-      // Cards 1–9 get tooltips
+      // Cards 1–9 get shortcut chips
       for (let i = 1; i <= 9; i++) {
         expect(screen.getByText(`⌘${String(i)}`)).toBeInTheDocument();
       }
 
-      // Card 10 does NOT get a tooltip (position > 9 guard)
+      // Card 10 does NOT get a chip (position > 9 guard)
       expect(screen.queryByText("⌘10")).toBeNull();
 
-      // Card 10 itself is still rendered — only the overlay is suppressed
+      // Card 10 itself is still rendered — only the chip is suppressed
       expect(screen.getByRole("button", { name: /Remove card card-10/i })).toBeInTheDocument();
     });
+  });
+
+  // ── needsReview forwarding tests ─────────────────────────────────────────
+
+  it("forwards needsReview from sessionContext: card whose context has needsReview=true renders the NEEDS REVIEW label", () => {
+    renderNavBar(
+      <NavBar
+        cards={[
+          { id: "a", type: "terminal" },
+          { id: "b", type: "terminal" },
+        ]}
+        onAddTerminalCard={vi.fn()}
+        onAddDungeonCard={vi.fn()}
+        onRemoveCard={vi.fn()}
+        sessionContext={{
+          a: {
+            sessionTs: "20260425-120000",
+            slug: "needs-review-slug",
+            workingDirectory: "/some/path",
+            needsReview: true,
+          },
+        }}
+        shellContext={{}}
+        activeId={null}
+      />,
+    );
+
+    // Card "a" has needsReview=true — label must appear exactly once
+    const labels = screen.getAllByText("NEEDS REVIEW");
+    expect(labels).toHaveLength(1);
+
+    // Card "b" has no context — NEEDS REVIEW must not appear a second time
+    // (already verified by length=1 above)
   });
 
   it("forwards active prop: card whose id matches activeId has data-active='true'; others 'false'", () => {
