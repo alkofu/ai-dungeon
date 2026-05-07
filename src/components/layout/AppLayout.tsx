@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import {
   ActionIcon,
   AppShell,
@@ -82,6 +82,11 @@ export function AppLayout({
   // Track whether a drag is in progress so the effect below does not snap the
   // width back to the persisted value while the user is still dragging (F-6).
   const draggingRef = React.useRef(false);
+  // Ref to the AppShell root element for direct CSS variable mutation during drag.
+  // This avoids scheduling a React re-render on every pointermove, which would
+  // cause Mantine to update --app-shell-navbar-width via a style recalc and
+  // trigger the xterm ResizeObserver → terminal.fit() blink path.
+  const appShellRef = useRef<HTMLElement | null>(null);
   // Sync liveWidth when persistedWidth changes (e.g. settings reloaded from disk),
   // but only when no drag is in progress.
   useEffect(() => {
@@ -157,6 +162,7 @@ export function AppLayout({
       onChange={onActiveIdChange}
     >
       <AppShell
+        ref={appShellRef}
         header={{ height: 60 }}
         navbar={{
           width: liveWidth,
@@ -229,10 +235,19 @@ export function AppLayout({
             width={liveWidth}
             onWidthChange={(next) => {
               draggingRef.current = true;
-              setLiveWidth(next);
+              // Direct CSS variable mutation — no React re-render during drag.
+              // Mantine sets --app-shell-navbar-width via a <style> tag on :root;
+              // we override it with an inline style on the AppShell root element
+              // to drive the layout at full frame rate without scheduling a React
+              // render on every pointermove. Inline styles have higher specificity
+              // than stylesheet rules, so this override wins on the AppShell subtree.
+              appShellRef.current?.style.setProperty("--app-shell-navbar-width", `${next}px`);
             }}
             onCommit={(final) => {
               draggingRef.current = false;
+              // Sync React state once after drag ends so any subsequent re-render
+              // (e.g., tab switch, settings update) uses the committed width.
+              setLiveWidth(final);
               setWidth(final);
             }}
             min={MIN}
