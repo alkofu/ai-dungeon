@@ -66,6 +66,16 @@ export function NavbarResizer({
       currentWidthRef.current = width;
     }
   }, [width]);
+
+  // Cleanup guard: if NavbarResizer unmounts while a drag is in flight
+  // (e.g., hot-reload, route change, error boundary), the "is-resizing"
+  // class must be removed so Terminal's ResizeObserver resumes normally.
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
+    };
+  }, []);
+
   // Ref to the separator element for direct aria-valuenow mutation during drag.
   // Because the parent no longer updates liveWidth on every pointermove (to avoid
   // React re-renders that cause the terminal blink), aria-valuenow would otherwise
@@ -78,6 +88,7 @@ export function NavbarResizer({
     draggingRef.current = true;
     startClientXRef.current = e.clientX;
     startWidthRef.current = currentWidthRef.current;
+    document.body.classList.add("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -94,6 +105,7 @@ export function NavbarResizer({
     if (!draggingRef.current) return;
     draggingRef.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
+    document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
     onCommit(currentWidthRef.current);
     // aria-valuenow will be set correctly by React on the next render after
     // onCommit triggers setLiveWidth(final) in the parent.

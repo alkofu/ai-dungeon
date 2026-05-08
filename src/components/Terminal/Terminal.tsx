@@ -294,7 +294,11 @@ export function Terminal({
 
     // ── ResizeObserver ────────────────────────────────────────────────────────
     // Always call fitAddon.fit() — the PTY resize IPC only fires once ready.
+    // Exception: skip during navbar drag (body class "is-resizing" is set by
+    // NavbarResizer on pointerDown and cleared on pointerUp/pointerCancel) to
+    // prevent fitAddon.fit() from redrawing the terminal at ~60fps during drag.
     const observer = new ResizeObserver(() => {
+      if (document.body.classList.contains("is-resizing")) return;
       fitAddon.fit();
       if (!isReadyRef.current) return;
 
@@ -309,6 +313,27 @@ export function Terminal({
       });
     });
     observer.observe(containerRef.current);
+
+    // ── MutationObserver (drag-end refit) ────────────────────────────────────
+    // After NavbarResizer removes "is-resizing" the ResizeObserver will not
+    // re-fire (the CSS variable was already set to the final value via direct
+    // DOM mutation in onWidthChange, so onCommit's React re-render causes no
+    // layout change). This MutationObserver triggers the one final fit() call.
+    let wasResizing = false;
+    const mutationObserver = new MutationObserver(() => {
+      const isResizing = document.body.classList.contains("is-resizing");
+      if (wasResizing && !isResizing) {
+        fitAddon.fit();
+        if (isReadyRef.current) {
+          const dims = fitAddon.proposeDimensions();
+          if (dims) {
+            void invoke("pty_resize", { sessionId, cols: dims.cols, rows: dims.rows });
+          }
+        }
+      }
+      wasResizing = isResizing;
+    });
+    mutationObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
     // ── Spawn-chain: append this mount's spawn to the per-sid chain ───────────
     // `previousChain` is whatever the prior mount (or a prior kill) settled as.
@@ -539,6 +564,7 @@ export function Terminal({
       // Clear accumulated shell context so a remount starts clean.
       lastShellContextRef.current = null;
       observer.disconnect();
+      mutationObserver.disconnect();
       oscDisposable?.dispose(); // OSC 6800
       osc7Handler?.dispose(); // OSC 7
       osc7337Handler?.dispose(); // OSC 7337

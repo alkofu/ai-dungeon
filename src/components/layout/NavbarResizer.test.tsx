@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { NavbarResizer } from "./NavbarResizer";
 
@@ -67,6 +67,10 @@ describe("NavbarResizer — pointer drag", () => {
     // jsdom does not implement setPointerCapture — stub it on the prototype.
     window.HTMLElement.prototype.setPointerCapture = setPointerCaptureMock;
     window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  afterEach(() => {
+    document.body.classList.remove("is-resizing");
   });
 
   it("drag from clientX 250 to 350 calls onWidthChange with 350 (delta +100)", () => {
@@ -135,6 +139,41 @@ describe("NavbarResizer — pointer drag", () => {
     fireEvent.pointerCancel(sep, { pointerId: 1 });
 
     expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds 'is-resizing' class to document.body on pointerDown", () => {
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+  });
+
+  it("removes 'is-resizing' class from document.body on pointerUp", () => {
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    fireEvent.pointerUp(sep, { pointerId: 1, clientX: 300 });
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("removes 'is-resizing' class from document.body on pointerCancel", () => {
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    fireEvent.pointerCancel(sep, { pointerId: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("removes 'is-resizing' class from document.body when component unmounts mid-drag", () => {
+    const { unmount } = renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    unmount();
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
   });
 });
 
