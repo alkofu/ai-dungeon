@@ -438,6 +438,79 @@ describe("Terminal", () => {
     );
   });
 
+  // ── MutationObserver drag-end refit ──────────────────────────────────────
+
+  it("MutationObserver: calls fitAddon.fit() and pty_resize when 'is-resizing' class is removed and terminal is ready", async () => {
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+
+    // Wait for both listen() calls to confirm isReadyRef.current = true.
+    const mockListen = listen as unknown as AnyMock;
+    await vi.waitFor(() => {
+      expect(mockListen).toHaveBeenCalledTimes(2);
+    });
+
+    const fitInstance = getFitInstance();
+    fitInstance.fit.mockClear();
+    (invoke as unknown as AnyMock).mockClear();
+
+    // Simulate drag start: add the sentinel class.
+    document.body.classList.add("is-resizing");
+    // Flush MutationObserver microtask — the observer fires asynchronously.
+    await Promise.resolve();
+
+    // Simulate drag end: remove the sentinel class.
+    document.body.classList.remove("is-resizing");
+    await Promise.resolve();
+
+    // fitAddon.fit() must have been called exactly once after removal.
+    expect(fitInstance.fit).toHaveBeenCalledTimes(1);
+
+    // pty_resize must have been called because the terminal is ready.
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("pty_resize", {
+        sessionId: "00000000-0000-0000-0000-000000000001",
+        cols: 80,
+        rows: 24,
+      });
+    });
+  });
+
+  it("MutationObserver: calls fitAddon.fit() but NOT pty_resize when 'is-resizing' is removed and terminal is NOT ready", async () => {
+    // Make spawn hang so isReadyRef stays false.
+    const mockInvoke = invoke as unknown as AnyMock;
+    mockInvoke.mockImplementation(
+      (cmd: string) =>
+        new Promise((resolve) => {
+          if (cmd !== "pty_spawn") resolve(undefined);
+          // pty_spawn never resolves → isReadyRef stays false.
+        }),
+    );
+
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+
+    // Give React a tick to mount and set up the observers.
+    await new Promise((r) => setTimeout(r, 10));
+
+    const fitInstance = getFitInstance();
+    fitInstance.fit.mockClear();
+    mockInvoke.mockClear();
+
+    // Simulate drag start then end.
+    document.body.classList.add("is-resizing");
+    await Promise.resolve();
+    document.body.classList.remove("is-resizing");
+    await Promise.resolve();
+
+    // fitAddon.fit() must be called (always, regardless of ready state).
+    expect(fitInstance.fit).toHaveBeenCalledTimes(1);
+
+    // pty_resize must NOT have been called.
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "pty_resize",
+      expect.objectContaining({ sessionId: "00000000-0000-0000-0000-000000000001" }),
+    );
+  });
+
   it("disposes terminal and disconnects observer on unmount", async () => {
     const { unmount } = renderWithProviders(
       <Terminal sessionId="00000000-0000-0000-0000-000000000001" />,

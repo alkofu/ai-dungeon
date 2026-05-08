@@ -1020,13 +1020,16 @@ describe("AppLayout — navbar resizer", () => {
     // Initial width from mockNavbarWidthHolder.current (250)
     expect(sep).toHaveAttribute("aria-valuenow", "250");
 
-    // Start a drag: pointerDown at x=250, then move to x=350 → liveWidth becomes 350
+    // Start a drag: pointerDown at x=250, then move to x=350 → visual width becomes 350.
+    // Note: liveWidth (React state) is NOT updated on pointermove in the new design —
+    // the parent mutates --app-shell-navbar-width directly to avoid re-renders.
+    // NavbarResizer mutates aria-valuenow directly via separatorRef so it stays accurate.
     act(() => {
       fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
       fireEvent.pointerMove(sep, { pointerId: 1, clientX: 350, buttons: 1 });
     });
 
-    // liveWidth should now reflect the drag position (350)
+    // aria-valuenow reflects the drag position (350) via direct DOM mutation in NavbarResizer.
     expect(sep).toHaveAttribute("aria-valuenow", "350");
 
     // Simulate an external settings change arriving mid-drag

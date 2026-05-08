@@ -6,7 +6,7 @@
  */
 
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { NavbarResizer } from "./NavbarResizer";
 
@@ -67,6 +67,15 @@ describe("NavbarResizer — pointer drag", () => {
     // jsdom does not implement setPointerCapture — stub it on the prototype.
     window.HTMLElement.prototype.setPointerCapture = setPointerCaptureMock;
     window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+    // Make RAF synchronous so body-class removal assertions work without async flushing.
+    window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    };
+  });
+
+  afterEach(() => {
+    document.body.classList.remove("is-resizing");
   });
 
   it("drag from clientX 250 to 350 calls onWidthChange with 350 (delta +100)", () => {
@@ -135,6 +144,66 @@ describe("NavbarResizer — pointer drag", () => {
     fireEvent.pointerCancel(sep, { pointerId: 1 });
 
     expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds 'is-resizing' class to document.body on pointerDown", () => {
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+  });
+
+  it("removes 'is-resizing' class from document.body on pointerUp", () => {
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    fireEvent.pointerUp(sep, { pointerId: 1, clientX: 300 });
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("removes 'is-resizing' class from document.body on pointerCancel", () => {
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    fireEvent.pointerCancel(sep, { pointerId: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("removes 'is-resizing' class from document.body when component unmounts mid-drag", () => {
+    const { unmount } = renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    unmount();
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
+
+  it("defers 'is-resizing' removal to a RAF (class still present synchronously after pointerUp)", () => {
+    // Override the default synchronous RAF stub with one that captures
+    // the callback but does NOT invoke it — so we can assert the class
+    // is still present immediately after pointerUp.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length; // handle (unused)
+    };
+
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    fireEvent.pointerUp(sep, { pointerId: 1, clientX: 300 });
+
+    // Synchronously after pointerUp the class must still be set (RAF not yet run).
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    expect(rafCallbacks).toHaveLength(1);
+
+    // Flushing the RAF removes the class.
+    rafCallbacks[0]!(0);
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
   });
 });
 

@@ -24,7 +24,7 @@
  *   against.
  */
 
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 
 export interface NavbarResizerProps {
   /** Current sidebar width in pixels (used for ARIA and drag start). */
@@ -56,20 +56,48 @@ export function NavbarResizer({
   const startClientXRef = useRef(0);
   const startWidthRef = useRef(0);
   // Track the most recent live width so onCommit fires the right value on pointerUp.
+  // Sync from the `width` prop only when not dragging — syncing unconditionally
+  // would overwrite the drag-accumulated value when the parent re-renders mid-drag
+  // (e.g., an external settings update arrives while the user is still dragging).
   const currentWidthRef = useRef(width);
-  currentWidthRef.current = width;
+
+  useEffect(() => {
+    if (!draggingRef.current) {
+      currentWidthRef.current = width;
+    }
+  }, [width]);
+
+  // Cleanup guard: if NavbarResizer unmounts while a drag is in flight
+  // (e.g., hot-reload, route change, error boundary), the "is-resizing"
+  // class must be removed so Terminal's ResizeObserver resumes normally.
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
+    };
+  }, []);
+
+  // Ref to the separator element for direct aria-valuenow mutation during drag.
+  // Because the parent no longer updates liveWidth on every pointermove (to avoid
+  // React re-renders that cause the terminal blink), aria-valuenow would otherwise
+  // stay stale at the pre-drag value throughout the drag. We mutate it directly
+  // so screen readers and tests see the live position without scheduling a re-render.
+  const separatorRef = useRef<HTMLDivElement | null>(null);
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
     draggingRef.current = true;
     startClientXRef.current = e.clientX;
     startWidthRef.current = currentWidthRef.current;
+    document.body.classList.add("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!draggingRef.current) return;
     const next = clamp(startWidthRef.current + (e.clientX - startClientXRef.current), min, max);
     currentWidthRef.current = next;
+    // Update aria-valuenow directly so it reflects the live drag position.
+    // The React prop (width) stays at the pre-drag value until onCommit fires.
+    separatorRef.current?.setAttribute("aria-valuenow", String(next));
     onWidthChange(next);
   }
 
@@ -78,6 +106,22 @@ export function NavbarResizer({
     draggingRef.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
     onCommit(currentWidthRef.current);
+    // Defer class removal to the next animation frame so the add (pointerDown)
+    // and remove are always in separate tasks. If they land in the same task,
+    // the MutationObserver batches them to a net-zero change and the
+    // falling-edge wasResizing guard in Terminal.tsx never fires.
+    // The useEffect cleanup below removes the class synchronously on unmount,
+    // so an in-flight RAF that fires after unmount is a harmless no-op.
+    requestAnimationFrame(() => {
+      // Guard against a new drag starting before this RAF fires.
+      // If draggingRef is true, the new drag's pointerDown has already
+      // re-set the class; do not clear it.
+      if (!draggingRef.current) {
+        document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
+      }
+    });
+    // aria-valuenow will be set correctly by React on the next render after
+    // onCommit triggers setLiveWidth(final) in the parent.
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
@@ -96,6 +140,7 @@ export function NavbarResizer({
 
   return (
     <div
+      ref={separatorRef}
       role="separator"
       aria-orientation="vertical"
       aria-valuenow={width}
