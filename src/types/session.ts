@@ -12,6 +12,8 @@ export interface SessionContext {
   repo?: { owner: string; name: string };
   prNumber?: number;
   issueNumber?: number;
+  /** @untrusted field set by host UI, not the terminal payload. Currently UI-driven only; parser population is deferred to a follow-up. */
+  needsReview?: boolean;
 }
 
 /**

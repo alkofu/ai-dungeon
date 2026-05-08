@@ -1,4 +1,4 @@
-import type React from "react";
+import React, { useState } from "react";
 import { ActionIcon, Badge, Box, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconCircleDot, IconGitPullRequest } from "@tabler/icons-react";
 import type { SessionContext, ShellContext } from "../../types/session";
@@ -8,6 +8,9 @@ import { isMacPlatform } from "./useModifierHeld";
 // Deliberate formatting asymmetry: ⌘ has no + separator (self-contained glyph per macOS HIG);
 // Ctrl+ includes the + per Windows/Linux convention. Labels become ⌘1 and Ctrl+1.
 const SHORTCUT_GLYPH = isMacPlatform() ? "⌘" : "Ctrl+";
+
+/** Horizontal padding reserved for the absolutely-positioned close button (ActionIcon size="xs" ≈ 22px + spacing.sm ≈ 8px). */
+const CLOSE_BUTTON_RESERVE_PX = 28;
 
 function isSessionContext(m: SessionContext | ShellContext): m is SessionContext {
   return "slug" in m && typeof (m as SessionContext).slug === "string";
@@ -20,27 +23,16 @@ interface SessionCardProps {
   sessionContext?: SessionContext;
   /** OSC 7/7337 (shell) context — used when no session context is present. */
   shellContext?: ShellContext;
-  /** When true, shows a keyboard-shortcut overlay label (⌘N / Ctrl+N). Optional; defaults to false. */
+  /** When true, render the shortcut chip (⌘N / Ctrl+N) for positions 1–9. Driven by useModifierHeld(); the chip appears after the modifier key has been held for 250 ms. */
   modifierPressed?: boolean;
-  /** 1-based position of this card in the NavBar cards array. Overlay is only shown for positions 1–9. */
+  /** 1-based position of this card in the NavBar cards array. Shortcut chip is shown for positions 1–9. */
   position?: number;
   /** When true, applies the active visual treatment — dark background and bold typography. Defaults to false. */
   active?: boolean;
   /** Optional status subtitle rendered below the slug. When undefined the line is omitted entirely. */
   status?: string;
-}
-
-/**
- * Returns the last 1-2 path segments of a POSIX path (forward-slash only).
- * Trailing slashes are stripped before splitting.
- */
-function lastSegments(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  const parts = trimmed.split("/").filter(Boolean);
-  if (parts.length >= 2) {
-    return parts.slice(-2).join("/");
-  }
-  return parts[parts.length - 1] ?? "";
+  /** When true, renders the NEEDS REVIEW label and orange accent. Explicit prop wins; otherwise derived from sessionContext.needsReview. */
+  needsReview?: boolean;
 }
 
 export function SessionCard({
@@ -48,10 +40,11 @@ export function SessionCard({
   onRemove,
   sessionContext,
   shellContext,
-  modifierPressed = false,
   position = undefined,
   active = false,
   status,
+  needsReview: needsReviewProp,
+  modifierPressed = false,
 }: SessionCardProps) {
   // Intentional: OSC 7337 clear does not erase branch/repo on a session-bound card.
   // SessionContext is authoritative over transient shell drift.
@@ -60,135 +53,190 @@ export function SessionCard({
   const prNumber = isSessionContext(meta) ? meta.prNumber : undefined;
   const issueNumber = isSessionContext(meta) ? meta.issueNumber : undefined;
 
-  // Show the shortcut overlay only when modifier is held, position is valid (1–9).
-  const showShortcut =
-    modifierPressed === true && typeof position === "number" && position >= 1 && position <= 9;
+  // Explicit prop wins; otherwise derive from sessionContext when available.
+  const needsReview =
+    needsReviewProp !== undefined
+      ? needsReviewProp
+      : isSessionContext(meta)
+        ? (meta.needsReview ?? false)
+        : false;
+
+  const slug = isSessionContext(meta) ? meta.slug : "(shell)";
+
+  // Subtitle: "repo • branch" with no separator when one segment is absent.
+  const subtitleParts = [meta.repo?.name, meta.branch].filter(Boolean);
+
+  const hasBadges = prNumber != null || issueNumber != null;
+
+  const showShortcutChip = modifierPressed && position != null && position >= 1 && position <= 9;
+
+  const [hovered, setHovered] = useState(false);
 
   return (
-    // Mantine Tooltip cloneElement-s the wrapped Stack to inject a ref and hover handlers
-    // (onMouseEnter, onMouseLeave, onPointerDown, onPointerEnter). Because opened is
-    // controlled, useDismiss is disabled and these injected handlers are inert — tooltip
-    // visibility is driven solely by the opened prop.
-    // withinPortal={true} (the Mantine default) makes the floating panel escape
-    // Tabs.Tab's overflow:hidden clipping boundary set in NavBar.tsx.
-    <Tooltip
-      opened={showShortcut}
-      label={`${SHORTCUT_GLYPH}${String(position)}`}
-      position="right"
-      withArrow
-      withinPortal={true}
+    <Box
+      data-active={active ? "true" : "false"}
+      data-needs-review={needsReview ? "true" : "false"}
+      data-hovered={hovered ? "true" : "false"}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "relative",
+        borderLeft: `4px solid ${needsReview ? "var(--mantine-color-orange-6)" : "var(--mantine-color-blue-5)"}`,
+        borderRadius: "var(--mantine-radius-md)",
+        padding: "var(--mantine-spacing-md)",
+        backgroundColor: active ? "var(--mantine-color-blue-9)" : "var(--mantine-color-dark-7)",
+      }}
     >
-      <Box
-        bg={active ? "dark.7" : "transparent"}
-        p="xs"
-        style={{ borderRadius: "var(--mantine-radius-sm)" }}
-        data-active={active ? "true" : "false"}
-      >
-        <Stack gap="xs">
-          {/* Row 1: slug + close button */}
-          <Group justify="space-between" wrap="nowrap">
-            <Text size="sm" fw={active ? 700 : 500}>
-              {isSessionContext(meta) ? meta.slug : "(shell)"}
+      <Stack gap="xs">
+        {/* NEEDS REVIEW label */}
+        {needsReview && (
+          <Group gap={6} align="center">
+            <Box w={6} h={6} bg="orange.6" style={{ borderRadius: "50%" }} />
+            <Text size="xs" fw={700} c="orange.6" tt="uppercase" lts="0.05em">
+              NEEDS REVIEW
             </Text>
-            {/* component="div" avoids nesting <button> inside <button>
-              (Tabs.Tab renders as <button>; ActionIcon renders as <button> by default,
-              which is invalid HTML). Using a div with role="button" keeps the
-              accessible name and click behaviour while producing valid HTML. */}
-            <ActionIcon
-              component="div"
-              role="button"
-              aria-label={`Remove card ${cardId.slice(0, 8)}`}
-              variant="subtle"
-              size="xs"
-              tabIndex={0}
-              onClick={(event: React.MouseEvent) => {
-                event.stopPropagation();
-                onRemove(cardId);
-              }}
-              onKeyDown={(e: React.KeyboardEvent) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRemove(cardId);
-                }
-              }}
-            >
-              ×
-            </ActionIcon>
           </Group>
+        )}
 
-          {status != null && (
-            <Text size="xs" c={active ? "gray.4" : "dimmed"}>
-              {status}
+        {/* Header row: title + shortcut chip (modifier-gated) */}
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
+          <Stack gap={2}>
+            <Text size="md" fw={700} c="white">
+              {slug}
             </Text>
-          )}
+            {subtitleParts.length > 0 && (
+              <Text size="xs" fs="italic" c="dimmed">
+                {subtitleParts.map((part, i) => {
+                  const isRepo = i === 0 && meta.repo != null && part === meta.repo.name;
+                  const isBranch = part === meta.branch && meta.branch != null;
 
-          {/* Row 2: [repo : branch •] path-tail
-            repo and branch are optional — cleared by empty OSC 7337.
-            When absent, their segments (including the : and • separators) are omitted. */}
-          <Group gap="xs" wrap="nowrap">
-            {meta.repo != null && (
-              <>
-                <Tooltip label={`${meta.repo.owner}/${meta.repo.name}`} withinPortal={false}>
-                  <Text size="xs" c={active ? "white" : "dimmed"} truncate>
-                    {meta.repo.name}
-                  </Text>
-                </Tooltip>
-                <Text size="xs" c={active ? "white" : "dimmed"}>
-                  :
-                </Text>
-              </>
-            )}
-            {meta.branch != null && (
-              <>
-                <Text size="xs" c={active ? "white" : "dimmed"} truncate>
-                  {meta.branch}
-                </Text>
-                <Text size="xs" c={active ? "white" : "dimmed"}>
-                  •
-                </Text>
-              </>
-            )}
-            <Tooltip label={meta.workingDirectory} withinPortal={false}>
-              <Text size="xs" c={active ? "white" : "dimmed"} truncate>
-                {lastSegments(meta.workingDirectory)}
+                  if (isRepo) {
+                    return (
+                      <span key="repo">
+                        <Tooltip
+                          label={`${meta.repo!.owner}/${meta.repo!.name}`}
+                          withinPortal={false}
+                        >
+                          <span>{part}</span>
+                        </Tooltip>
+                        {subtitleParts.length > 1 ? " • " : ""}
+                      </span>
+                    );
+                  }
+                  if (isBranch && meta.workingDirectory) {
+                    return (
+                      <Tooltip key="branch" label={meta.workingDirectory} withinPortal={false}>
+                        <span>{part}</span>
+                      </Tooltip>
+                    );
+                  }
+                  return <span key={`part-${String(i)}`}>{part}</span>;
+                })}
               </Text>
-            </Tooltip>
-          </Group>
+            )}
+            {status != null && (
+              <Text size="xs" c="dimmed">
+                {status}
+              </Text>
+            )}
+          </Stack>
+          {/* Shortcut chip — modifier-gated: visible only when modifier is held for 250ms.
+              pr=CLOSE_BUTTON_RESERVE_PX reserves space for the absolutely-positioned close button (Step 9)
+              so it does not overlap the chip when both are visible. */}
+          {showShortcutChip && (
+            <Group gap="xs" pr={CLOSE_BUTTON_RESERVE_PX}>
+              <Box
+                px={8}
+                py={2}
+                style={{
+                  backgroundColor: "var(--mantine-color-gray-2)",
+                  color: "var(--mantine-color-dark-9)",
+                  borderRadius: "var(--mantine-radius-sm)",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 2,
+                }}
+              >
+                {SHORTCUT_GLYPH}
+                {String(position)}
+              </Box>
+            </Group>
+          )}
+        </Group>
 
-          {/* Row 3: optional PR badge, optional Issue badge, placeholder badge */}
-          <Box
-            style={{
-              borderTop: "1px solid var(--mantine-color-default-border)",
-              paddingTop: "var(--mantine-spacing-xs)",
-            }}
-          />
-          <Group gap="xs" wrap="nowrap" opacity={0.6}>
-            {prNumber != null && (
-              <Badge
-                size="xs"
-                variant="light"
-                leftSection={<IconGitPullRequest size="1em" role="img" aria-label="Pull request" />}
-              >
-                {`PR #${prNumber}`}
-              </Badge>
-            )}
-            {issueNumber != null && (
-              <Badge
-                size="xs"
-                variant="light"
-                leftSection={<IconCircleDot size="1em" role="img" aria-label="Issue" />}
-              >
-                {`#${issueNumber}`}
-              </Badge>
-            )}
-            {/* No leftSection: placeholder badge intentionally renders no icon. */}
-            <Badge size="xs" variant="light">
-              —
-            </Badge>
-          </Group>
-        </Stack>
-      </Box>
-    </Tooltip>
+        {/* Close button — hover-reveal, absolutely positioned at top-right of card.
+            component="div" avoids nesting <button> inside <button>
+            (Tabs.Tab renders as <button>; ActionIcon renders as <button> by default,
+            which is invalid HTML). Using a div with role="button" keeps the
+            accessible name and click behaviour while producing valid HTML. */}
+        <ActionIcon
+          component="div"
+          role="button"
+          aria-label={`Remove card ${cardId.slice(0, 8)}`}
+          variant="subtle"
+          size="xs"
+          tabIndex={0}
+          // Load-bearing for keyboard a11y: focus reveals the close button so it is
+          // visible when interacted with via keyboard. Do not decouple from `hovered` state.
+          onFocus={() => setHovered(true)}
+          onBlur={() => setHovered(false)}
+          style={{
+            position: "absolute",
+            top: "var(--mantine-spacing-sm)",
+            right: "var(--mantine-spacing-sm)",
+            opacity: hovered ? 1 : 0,
+            pointerEvents: hovered ? "auto" : "none",
+            transition: "opacity 120ms ease",
+          }}
+          onClick={(event: React.MouseEvent) => {
+            event.stopPropagation();
+            onRemove(cardId);
+          }}
+          onKeyDown={(e: React.KeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onRemove(cardId);
+            }
+          }}
+        >
+          ×
+        </ActionIcon>
+
+        {/* Badge slot — always rendered to reserve constant height whether or not badges are present */}
+        <Box data-testid="badge-slot" style={{ minHeight: "var(--mantine-spacing-lg)" }}>
+          {hasBadges && (
+            <Group gap="xs" wrap="nowrap">
+              {prNumber != null && (
+                <Badge
+                  size="sm"
+                  variant="filled"
+                  color={needsReview ? "orange" : "blue"}
+                  radius="sm"
+                  leftSection={
+                    <IconGitPullRequest size={12} role="img" aria-label="Pull request" />
+                  }
+                >
+                  {`#${prNumber}`}
+                </Badge>
+              )}
+              {issueNumber != null && (
+                <Badge
+                  size="sm"
+                  variant="filled"
+                  color={needsReview ? "orange" : "blue"}
+                  radius="sm"
+                  leftSection={<IconCircleDot size={12} role="img" aria-label="Issue" />}
+                >
+                  {`#${issueNumber}`}
+                </Badge>
+              )}
+            </Group>
+          )}
+        </Box>
+      </Stack>
+    </Box>
   );
 }

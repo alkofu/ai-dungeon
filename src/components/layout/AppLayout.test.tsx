@@ -475,6 +475,47 @@ describe("AppLayout — keyboard navigation", () => {
     expect(onActiveIdChange).not.toHaveBeenCalled();
   });
 
+  it("holding Meta for 250ms shows ⌘1/⌘2/⌘3 on 3 cards; releasing hides them", async () => {
+    // Mirror the pattern from useModifierHeld.test.ts (which passes):
+    // use fake timers, dispatch to window, advance via act+advanceTimersByTime.
+    vi.useFakeTimers();
+    try {
+      // Render with fake timers active so React internals and the hook all use
+      // the same fake time base. Wrap in act so effects flush synchronously.
+      await act(async () => {
+        renderLayout(threeCards, "A");
+      });
+
+      // Before any keypress, no chips are rendered (modifier not held).
+      expect(screen.queryByText(/^⌘/)).toBeNull();
+
+      // In jsdom the navigator does not identify as macOS, so isMacPlatform()
+      // returns false inside useModifierHeld, meaning the watched key is
+      // "Control" (not "Meta"). Dispatch Control keydown.
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", bubbles: true }));
+
+      // Advance past the 250ms threshold; act() flushes the React re-render
+      // triggered by setPressed(true) inside the hook's timer callback.
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Chips should now be visible (modifierPressed=true) on all three cards.
+      // The SHORTCUT_GLYPH is "⌘" because isMacPlatform is mocked to true at
+      // module load time for SessionCard.tsx; the hook separately uses the
+      // real navigator to decide which key to watch (Control in jsdom).
+      expect(screen.getAllByText(/^⌘/)).toHaveLength(3);
+
+      // Dispatch Control keyup — chips disappear immediately.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keyup", { key: "Control", bubbles: true }));
+      });
+      expect(screen.queryByText(/^⌘/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("hotkey fires while a textarea is focused (tagsToIgnore: [] override)", async () => {
     const { onActiveIdChange, user } = renderLayout(threeCards, "B");
 
@@ -493,82 +534,6 @@ describe("AppLayout — keyboard navigation", () => {
     } finally {
       document.body.removeChild(textarea);
     }
-  });
-});
-
-// ── Shortcut tooltip overlay integration tests ─────────────────────────────────
-
-describe("AppLayout — shortcut tooltip overlay", () => {
-  // Use real timers — the existing test infrastructure (vi.mock chain, installSessionAwareMock,
-  // _clearSpawnChainForTesting, vi.waitFor) does not mix safely with vi.useFakeTimers().
-  // The 250 ms hold delay is exercised via real wall-clock time in vi.waitFor polling.
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    _clearSpawnChainForTesting();
-    (invoke as unknown as AnyMock).mockResolvedValue(1);
-    globalThis.ResizeObserver = vi.fn().mockImplementation(function () {
-      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
-    }) as unknown as typeof ResizeObserver;
-
-    // Stub macOS so isMacPlatform() returns true → ⌘ glyph
-    Object.defineProperty(navigator, "userAgentData", {
-      value: { platform: "macOS" },
-      configurable: true,
-      writable: true,
-    });
-  });
-
-  afterEach(() => {
-    Object.defineProperty(navigator, "userAgentData", {
-      value: undefined,
-      configurable: true,
-      writable: true,
-    });
-  });
-
-  it("holding Meta for 250ms shows ⌘1/⌘2/⌘3 on 3 cards; releasing hides them", async () => {
-    const user = userEvent.setup({ delay: null });
-
-    renderWithProviders(
-      <AppLayout
-        cards={[
-          { id: "A", type: "terminal" },
-          { id: "B", type: "terminal" },
-          { id: "C", type: "terminal" },
-        ]}
-        onAddTerminalCard={vi.fn()}
-        onAddDungeonCard={vi.fn()}
-        onRemoveCard={vi.fn()}
-        activeId="A"
-        onActiveIdChange={vi.fn()}
-        sessionContext={{}}
-        onSessionContextChange={vi.fn()}
-        shellContext={{}}
-        onShellContextChange={vi.fn()}
-        readyCardIds={new Set()}
-        onCardReady={vi.fn()}
-      />,
-    );
-
-    // No tooltip initially
-    expect(screen.queryByText("⌘1")).toBeNull();
-
-    // Hold Meta key open (no release)
-    await user.keyboard("{Meta>}");
-
-    // Wait for the 250 ms hold-delay timer to fire; poll with a generous timeout
-    await vi.waitFor(() => expect(screen.getByText("⌘1")).toBeInTheDocument(), {
-      timeout: 500,
-    });
-    expect(screen.getByText("⌘2")).toBeInTheDocument();
-    expect(screen.getByText("⌘3")).toBeInTheDocument();
-
-    // Release Meta
-    await user.keyboard("{/Meta}");
-
-    // Tooltips should disappear
-    await vi.waitFor(() => expect(screen.queryByText("⌘1")).toBeNull());
   });
 });
 
