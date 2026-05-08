@@ -51,9 +51,15 @@ ai-dungeon/
 │   ├── icons/        # App icons (all sizes)
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+├── e2e/                  # Playwright end-to-end tests (run against the Vite dev server on port 1420)
+│   ├── fixtures/
+│   │   └── app-fixtures.ts   # Shared fixture module — extends Playwright's `test` with project-wide helpers (e.g., `addTerminalCard`). Import `{ test, expect }` from here in every spec; never import directly from `@playwright/test`.
+│   ├── smoke.spec.ts         # Baseline smoke spec; also serves as a copy-paste template for new e2e authors. See the module-level JSDoc for authoring conventions.
+│   └── terminal-font-rendering.spec.ts  # MesloLGS NF font-loading regression test — asserts `document.fonts.check('13px "MesloLGS NF"')` after a terminal card mounts.
 ├── scripts/
 │   └── dev-worktree.sh   # Worktree dev launcher — validates the named worktree under `.worktrees/`, checks port 1420, runs `pnpm install --prefer-offline`, then `exec`s `pnpm tauri dev`. Invoked via `pnpm dev:worktree <name>`.
 ├── index.html
+├── playwright.config.ts  # Playwright e2e config — `testDir: ./e2e`, Vite dev server on port 1420, Chromium-only project.
 ├── vite.config.ts
 ├── tsconfig.json
 └── package.json
