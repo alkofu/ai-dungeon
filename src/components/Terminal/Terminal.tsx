@@ -276,12 +276,18 @@ export function Terminal({
     });
 
     // FitAddon.fit() returns silently when dimensions are zero (not a throw).
-    // Run synchronously here (Invariant I3): the spawn IIFE reads
-    // fitAddon.proposeDimensions() synchronously to compute initial cols/rows.
-    // fit() running before fonts are loaded computes cell dimensions against
-    // the fallback font; this is acceptable because xterm re-measures inside
-    // term.open() against the resolved font. Any one-cell drift self-corrects
-    // via the ResizeObserver after term.open().
+    // Run synchronously here (Invariant I3): the SOLE purpose of this early
+    // fit() call is to seed fitAddon.proposeDimensions() with non-default
+    // cols/rows so the concurrent spawn IIFE can pass accurate PTY dimensions
+    // to pty_spawn. It does NOT size the renderer — term.open() has not been
+    // called yet, so the renderer does not exist.
+    //
+    // A second fitAddon.fit() is called immediately after term.open() (see the
+    // font-load IIFE below). That second call is REQUIRED: ResizeObserver does
+    // not self-fire when the container has not changed size between the
+    // observer.observe() call (above) and term.open() completing. Without the
+    // post-open fit(), the terminal renderer starts with the wrong dimensions
+    // and the PTY viewport is never correctly sized on initial mount.
     fitAddon.fit();
 
     // ── ResizeObserver ────────────────────────────────────────────────────────

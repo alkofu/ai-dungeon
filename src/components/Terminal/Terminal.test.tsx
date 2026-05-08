@@ -337,6 +337,30 @@ describe("Terminal", () => {
     expect(fitInstance.fit).toHaveBeenCalled();
   });
 
+  it("calls fitAddon.fit at least twice on initial mount and the second call occurs after term.open (fit-after-open regression)", async () => {
+    renderWithProviders(<Terminal sessionId="00000000-0000-0000-0000-000000000001" />);
+
+    const termInstance = getTermInstance();
+    const fitInstance = getFitInstance();
+
+    // Wait for term.open to be called (inside the font-load IIFE, after loadFonts resolves).
+    await vi.waitFor(() => {
+      expect(termInstance.open).toHaveBeenCalledTimes(1);
+    });
+
+    // At this point both the pre-open fit() (line ~285) and the post-open fit()
+    // (immediately after term.open()) must have fired.
+    expect(fitInstance.fit.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    // The second fit() must have been called AFTER term.open():
+    // invocationCallOrder is a monotonically increasing integer assigned by
+    // Vitest to each mock call globally — a higher number means a later call.
+    const openOrder = termInstance.open.mock.invocationCallOrder[0];
+    // The first fit() is pre-open; the second fit() is post-open.
+    const secondFitOrder = fitInstance.fit.mock.invocationCallOrder[1];
+    expect(secondFitOrder).toBeGreaterThan(openOrder);
+  });
+
   it("calls pty_resize when ResizeObserver fires after spawn is ready", async () => {
     let resizeCallback: (() => void) | undefined;
     globalThis.ResizeObserver = vi.fn().mockImplementation(function (cb: () => void) {
