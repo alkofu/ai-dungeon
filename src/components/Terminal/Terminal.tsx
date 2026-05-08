@@ -371,6 +371,7 @@ export function Terminal({
       if (cancelled) return;
 
       term.open(containerRef.current!);
+      fitAddon.fit();
 
       // ── OSC 6800 handler (Invariant I1: must be after term.open) ─────────────
       // Intercepts OSC 6800 sequences emitted by the TPK toolkit to surface
