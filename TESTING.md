@@ -64,10 +64,31 @@ npx playwright install chromium
 
 This downloads the Chromium browser binary. Without it, `pnpm test:e2e` will fail with a "browser not installed" error.
 
+### Shared fixtures and helper convention
+
+Shared helpers live in `e2e/fixtures/app-fixtures.ts`. The convention is Playwright `test.extend` fixtures rather than page-object classes — fixtures compose naturally with Playwright's built-in lifecycle, are parallel-safe by design, and avoid the stateful `this` coupling that page-object classes introduce.
+
+Every spec should import `{ test, expect }` from `./fixtures/app-fixtures` rather than from `@playwright/test` directly. This ensures all specs use the extended test runner with the shared fixtures available on the test-context argument.
+
+Currently available fixture:
+
+- **`addTerminalCard(page)`** — clicks the "Add card menu" button, selects "Terminal", and awaits `[data-testid="terminal-root"]`. Example usage:
+
+  ```ts
+  test("my test", async ({ page, addTerminalCard }) => {
+    await page.goto("/");
+    await addTerminalCard(page);
+    // terminal is now mounted
+  });
+  ```
+
+See `e2e/smoke.spec.ts` for the canonical template when writing a new spec.
+
 ### E2E specs
 
 | Spec file                             | What it covers                                                                                                                                                                                         |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `e2e/smoke.spec.ts`                   | Boots the dev server and asserts the empty-state element is visible on first load — minimal smoke test and copy-paste template for new e2e authors.                                                    |
 | `e2e/terminal-font-rendering.spec.ts` | Boots the dev server, adds a terminal card, and asserts `document.fonts.check('13px "MesloLGS NF"')` returns `true` — verifying the MesloLGS NF font is loaded before `term.open()` fires (issue #32). |
 
 ## Coverage
