@@ -35,7 +35,7 @@ ai-dungeon/
 │           ├── DungeonPanel.tsx       # Dungeon card panel — mounts useDungeonSidecar and useDungeonSend; renders Hi / Clean buttons; displays sidecar reply or error text
 │           ├── DungeonPanel.test.tsx
 │           ├── NavBar.tsx             # Sidebar — "+" opens a Mantine Menu with Terminal / Dungeon items; passes per-card sessionContext, shellContext, and active state to each SessionCard
-│           ├── SessionCard.tsx        # Tab label: slug + close button (bold on active), optional status subtitle, repo:branch • path-tail, PR/Issue badges below a divider at 60% opacity; active cards receive a dark.7 background; rendering precedence: sessionContext ?? shellContext ?? mock
+│           ├── SessionCard.tsx        # Tab label: 6 visual variants (default, has-issue, has-PR, has-both, active, needs-review); modifier-gated ⌘N shortcut chip (positions 1–9, visible only while modifier key is held ≥250 ms); 4 px left-border accent (blue / orange); subtitle = repo • branch with working-directory tooltip on branch text; PR/Issue badges (#N format) in a fixed-height reserved slot (card height is stable regardless of badge presence); hover/focus-reveal × close button (hidden by default, shown on pointer hover or keyboard focus); NEEDS REVIEW label + orange accent when needsReview=true; rendering precedence: sessionContext ?? shellContext ?? mock
 │           ├── SessionCard.test.tsx   # Unit tests for SessionCard (two-slot rendering + legacy cases)
 │           ├── NavbarResizer.tsx      # Draggable separator between sidebar and main content. Props: width, onWidthChange (fired every pointermove), onCommit (fired on pointerup and each keyboard nudge), min, max, visible. Uses setPointerCapture for pointer locking. Exposes role="separator" with aria-orientation, aria-valuenow/min/max. Hidden (display: none, tabIndex=-1) when visible===false (sidebar collapsed).
 │           ├── useNavbarWidth.ts     # Hook: reads settings.layout?.navbarWidth (fallback 250), clamps into [MIN_NAVBAR_WIDTH, MAX_NAVBAR_WIDTH], exposes { width, setWidth, MIN, MAX }. setWidth persists via updateSettings — clamping is applied before the call. Exports MIN_NAVBAR_WIDTH=160 and MAX_NAVBAR_WIDTH=600 as named constants.
@@ -183,7 +183,7 @@ Per-dungeon-card panel component. Mounts `useDungeonSidecar` (lifecycle) and `us
 
 The app uses a two-slot card context model. Each tab card independently accumulates context from two sources:
 
-- **SessionContext** (OSC 6800) — full session snapshot emitted by an AI CLI. Contains slug, workingDirectory, branch, repo, prNumber, issueNumber.
+- **SessionContext** (OSC 6800) — full session snapshot emitted by an AI CLI. Contains slug, workingDirectory, branch, repo, prNumber, issueNumber, and an optional needsReview flag.
 - **ShellContext** (OSC 7 / OSC 7337) — shell-derived context: workingDirectory from OSC 7 (`file://` URI) and branch/repo from OSC 7337.
 
 Rendering precedence in `SessionCard.tsx`: `sessionContext ?? shellContext ?? getMockSessionContext(cardId)`.
@@ -200,6 +200,6 @@ The data travels through the following layers:
 2. **`Terminal.tsx`** — xterm.js intercepts OSC 6800, OSC 7, and OSC 7337. The 6800 handler dispatches a full SessionContext via `onSessionContextChange`; the 7 and 7337 handlers accumulate a ShellContext in `lastShellContextRef` and dispatch via `onShellContextChange`. Each handler delegates parsing to a dedicated parser in `sessionPayload.ts`, then wraps the dispatch in `queueMicrotask` to avoid re-entering the parser synchronously. The handlers are cleaned up on component unmount.
 3. **`parseSessionContextPayload()` / `parseOsc7Payload()` / `parseOsc7337Payload()` (`src/types/sessionPayload.ts`)** — single audit entry point for all OSC payload validation. Returns `SessionContext` / `ShellContext | null` / partial updates / null respectively. Never throw.
 4. **`App.tsx` reducer** — `setSessionContext` stores a validated SessionContext in `AppState.sessionContext[id]` (full replacement). `setShellContext` stores a validated ShellContext in `AppState.shellContext[id]` (full replacement). Both are no-ops if the card id is not in `state.cards` — guards against races where an OSC handler fires after the card is removed.
-5. **`SessionCard.tsx`** — applies the `sessionContext ?? shellContext ?? mock` precedence. SessionContext is authoritative: an empty OSC 7337 clear does not erase branch/repo on a session-bound card.
+5. **`SessionCard.tsx`** — applies the `sessionContext ?? shellContext ?? mock` precedence. SessionContext is authoritative: an empty OSC 7337 clear does not erase branch/repo on a session-bound card. The `needsReview` flag from SessionContext (or a direct prop override) triggers the orange visual variant and the "NEEDS REVIEW" label.
 
 All `SessionContext` and `ShellContext` fields are treated as untrusted user-controlled data and must only be rendered as text. See [security.md](security.md) for the rendering constraint. For the full OSC field specification, see [osc-protocol.md](osc-protocol.md).
