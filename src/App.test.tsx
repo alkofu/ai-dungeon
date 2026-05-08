@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { act } from "@testing-library/react";
 import { renderWithProviders } from "./test-utils/render";
@@ -135,7 +135,7 @@ describe("App", () => {
 
   it("adds and removes a card via the navbar", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<App />);
+    const { container } = renderWithProviders(<App />);
 
     await user.click(screen.getByRole("button", { name: "Add card menu" }));
     await user.click(screen.getByRole("menuitem", { name: "Terminal" }));
@@ -146,7 +146,11 @@ describe("App", () => {
     // After adding one card, exactly one terminal is mounted.
     expect(screen.queryAllByTestId("terminal-root")).toHaveLength(1);
 
-    await user.click(removeButton);
+    // Hover the card to reveal the close button, then click via fireEvent
+    // (user.click checks pointer-events before dispatching; fireEvent bypasses it).
+    const card = container.querySelector("[data-active]") as Element;
+    fireEvent.mouseEnter(card);
+    fireEvent.click(removeButton);
 
     expect(screen.queryByRole("button", { name: /Remove card/i })).toBeNull();
     // After removing the only card, no terminals remain in the DOM.
@@ -187,7 +191,7 @@ describe("App", () => {
 
   it("moves the active tab to the previous card when the active (last) card is removed", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<App />);
+    const { container } = renderWithProviders(<App />);
 
     // Add three cards: A (active), B, C.
     await user.click(screen.getByRole("button", { name: "Add card menu" }));
@@ -207,7 +211,11 @@ describe("App", () => {
 
     // Remove C (the active tab) — active should move to B (previous in list).
     const removeButtons = screen.getAllByRole("button", { name: /Remove card/i });
-    await user.click(removeButtons[2]);
+    // Hover the third card to reveal its close button, then click via fireEvent
+    // (user.click checks pointer-events before dispatching; fireEvent bypasses it).
+    const cards = container.querySelectorAll("[data-active]");
+    fireEvent.mouseEnter(cards[2]);
+    fireEvent.click(removeButtons[2]);
 
     // Now two tabs remain; the last one (B, now at index 1) should be active.
     const remainingTabs = screen.getAllByRole("tab");
@@ -216,7 +224,9 @@ describe("App", () => {
 
     // Remove B (active) — active moves to A (the only remaining card).
     const removeButtons2 = screen.getAllByRole("button", { name: /Remove card/i });
-    await user.click(removeButtons2[1]);
+    const remainingCards = container.querySelectorAll("[data-active]");
+    fireEvent.mouseEnter(remainingCards[1]);
+    fireEvent.click(removeButtons2[1]);
 
     const finalTabs = screen.getAllByRole("tab");
     expect(finalTabs).toHaveLength(1);
@@ -224,7 +234,9 @@ describe("App", () => {
 
     // Remove A — empty state returns.
     const lastRemoveButton = screen.getByRole("button", { name: /Remove card/i });
-    await user.click(lastRemoveButton);
+    const lastCards = container.querySelectorAll("[data-active]");
+    fireEvent.mouseEnter(lastCards[0]);
+    fireEvent.click(lastRemoveButton);
 
     expect(screen.queryAllByTestId("terminal-root")).toHaveLength(0);
     expect(screen.getByTestId("main-empty-state")).toBeInTheDocument();
@@ -232,7 +244,7 @@ describe("App", () => {
 
   it("moves active tab to previous card when a non-last active card is removed (F-3)", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<App />);
+    const { container } = renderWithProviders(<App />);
 
     // Add three cards A, B, C. A is active (first-add rule).
     await user.click(screen.getByRole("button", { name: "Add card menu" }));
@@ -250,7 +262,11 @@ describe("App", () => {
 
     // Remove B — active should move to A (previous, index 0 in remaining [A, C]).
     const removeButtons = screen.getAllByRole("button", { name: /Remove card/i });
-    await user.click(removeButtons[1]);
+    // Hover the second card (B) to reveal its close button, then click via fireEvent
+    // (user.click checks pointer-events before dispatching; fireEvent bypasses it).
+    const cards = container.querySelectorAll("[data-active]");
+    fireEvent.mouseEnter(cards[1]);
+    fireEvent.click(removeButtons[1]);
 
     const remainingTabs = screen.getAllByRole("tab");
     expect(remainingTabs).toHaveLength(2);
@@ -448,7 +464,7 @@ describe("App", () => {
 
   it("removing a terminal card clears its readyCardIds entry (no leak)", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<App />);
+    const { container } = renderWithProviders(<App />);
 
     // Add a card and fire onReady.
     await user.click(screen.getByRole("button", { name: "Add card menu" }));
@@ -461,8 +477,11 @@ describe("App", () => {
     // Overlay should be gone after onReady.
     expect(screen.queryByTestId("terminal-loading-overlay")).toBeNull();
 
-    // Remove the card.
-    await user.click(screen.getByRole("button", { name: /Remove card/i }));
+    // Remove the card — hover first to reveal the close button, then click via
+    // fireEvent (user.click checks pointer-events; fireEvent bypasses it).
+    const card = container.querySelector("[data-active]") as Element;
+    fireEvent.mouseEnter(card);
+    fireEvent.click(screen.getByRole("button", { name: /Remove card/i }));
 
     // Add a new card — it should show the overlay (fresh id, not in readyCardIds).
     await user.click(screen.getByRole("button", { name: "Add card menu" }));

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { Tabs } from "@mantine/core";
@@ -144,7 +144,7 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderNavBar(
+    const { container } = renderNavBar(
       <NavBar
         cards={[
           { id: "a", type: "terminal" },
@@ -159,6 +159,11 @@ describe("NavBar", () => {
       />,
     );
 
+    // Fire mouseEnter on the card to set hovered=true — pointer-events: none
+    // on the close button blocks user.hover(), so we trigger the React synthetic
+    // event directly via fireEvent.
+    const cards = container.querySelectorAll("[data-active]");
+    fireEvent.mouseEnter(cards[0]);
     await user.click(screen.getByRole("button", { name: "Remove card a" }));
 
     expect(onRemoveCard).toHaveBeenCalledTimes(1);
@@ -257,8 +262,27 @@ describe("NavBar", () => {
 
   // ── Shortcut chip tests ───────────────────────────────────────────────────
 
-  describe("persistent shortcut chip", () => {
-    it("3 cards: shortcut chips ⌘1, ⌘2, ⌘3 are rendered", () => {
+  describe("modifier-gated shortcut chip", () => {
+    it("3 cards + modifierPressed=true: shortcut chips ⌘1, ⌘2, ⌘3 are rendered", () => {
+      renderNavBar(
+        <NavBar
+          cards={makeCards(3)}
+          onAddTerminalCard={vi.fn()}
+          onAddDungeonCard={vi.fn()}
+          onRemoveCard={vi.fn()}
+          sessionContext={{}}
+          shellContext={{}}
+          activeId={null}
+          modifierPressed={true}
+        />,
+      );
+
+      expect(screen.getByText("⌘1")).toBeInTheDocument();
+      expect(screen.getByText("⌘2")).toBeInTheDocument();
+      expect(screen.getByText("⌘3")).toBeInTheDocument();
+    });
+
+    it("3 cards + modifierPressed=false (default): no ⌘N text in DOM", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(3)}
@@ -271,12 +295,10 @@ describe("NavBar", () => {
         />,
       );
 
-      expect(screen.getByText("⌘1")).toBeInTheDocument();
-      expect(screen.getByText("⌘2")).toBeInTheDocument();
-      expect(screen.getByText("⌘3")).toBeInTheDocument();
+      expect(screen.queryByText(/^⌘/)).toBeNull();
     });
 
-    it("11 cards: ⌘1–⌘9 present, ⌘10 absent; card 10 remove button still in DOM", () => {
+    it("11 cards + modifierPressed=true: ⌘1–⌘9 present, ⌘10 absent; card 10 remove button still in DOM", () => {
       renderNavBar(
         <NavBar
           cards={makeCards(11)}
@@ -286,6 +308,7 @@ describe("NavBar", () => {
           sessionContext={{}}
           shellContext={{}}
           activeId={null}
+          modifierPressed={true}
         />,
       );
 
@@ -366,7 +389,7 @@ describe("NavBar", () => {
     const onRemoveCard = vi.fn();
     const user = userEvent.setup();
 
-    renderWithProviders(
+    const { container } = renderWithProviders(
       <Tabs value={null} onChange={onChange} orientation="vertical">
         <NavBar
           cards={[{ id: "a", type: "terminal" }]}
@@ -380,6 +403,11 @@ describe("NavBar", () => {
       </Tabs>,
     );
 
+    // Fire mouseEnter on the card to set hovered=true — pointer-events: none
+    // on the close button blocks user.hover(), so we trigger the React synthetic
+    // event directly via fireEvent.
+    const card = container.querySelector("[data-active]") as Element;
+    fireEvent.mouseEnter(card);
     await user.click(screen.getByRole("button", { name: "Remove card a" }));
 
     // onRemoveCard fires once, but the Tabs onChange handler must NOT be called.

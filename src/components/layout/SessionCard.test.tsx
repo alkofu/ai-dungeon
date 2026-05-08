@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { Tabs } from "@mantine/core";
@@ -68,11 +68,16 @@ describe("SessionCard", () => {
   it("2. renders close button with correct aria-label and calls onRemove when clicked", async () => {
     const onRemove = vi.fn();
     const user = userEvent.setup();
-    renderInTabs("abcdefgh-1234-5678-abcd-ef1234567890", onRemove);
+    const { container } = renderInTabs("abcdefgh-1234-5678-abcd-ef1234567890", onRemove);
 
     const btn = screen.getByRole("button", { name: "Remove card abcdefgh" });
     expect(btn).toBeInTheDocument();
 
+    // Fire mouseEnter on the card to set hovered=true — pointer-events: none
+    // on the close button blocks user.hover(), so we trigger the React synthetic
+    // event directly via fireEvent.
+    const card = container.querySelector("[data-active]") as Element;
+    fireEvent.mouseEnter(card);
     await user.click(btn);
 
     expect(onRemove).toHaveBeenCalledTimes(1);
@@ -415,36 +420,47 @@ describe("SessionCard", () => {
     expect(screen.getByText(liveContext.repo!.name)).toBeInTheDocument();
   });
 
-  // ── Persistent shortcut chip tests (Group a) ─────────────────────────────
+  // ── Modifier-gated shortcut chip tests ───────────────────────────────────
 
-  it("renders the persistent shortcut chip when position is 1–9 regardless of modifierPressed", () => {
+  it("renders the shortcut chip when position is 1–9 and modifierPressed is true", () => {
     renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value="card-3">
-          <SessionCard cardId="card-3" onRemove={vi.fn()} position={3} />
+          <SessionCard cardId="card-3" onRemove={vi.fn()} position={3} modifierPressed={true} />
         </Tabs.Tab>
       </Tabs>,
     );
     expect(screen.getByText("⌘3")).toBeInTheDocument();
   });
 
+  it("does not render the shortcut chip when modifierPressed is false even if position is 1–9", () => {
+    renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value="card-3">
+          <SessionCard cardId="card-3" onRemove={vi.fn()} position={3} modifierPressed={false} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    expect(screen.queryByText(/^⌘/)).toBeNull();
+  });
+
   it("does not render the shortcut chip when position is undefined or > 9", () => {
-    // Case 1: no position
+    // Case 1: no position (modifierPressed=true to isolate the position guard)
     const { unmount } = renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value="card-x">
-          <SessionCard cardId="card-x" onRemove={vi.fn()} />
+          <SessionCard cardId="card-x" onRemove={vi.fn()} modifierPressed={true} />
         </Tabs.Tab>
       </Tabs>,
     );
     expect(screen.queryByText(/^⌘/)).toBeNull();
     unmount();
 
-    // Case 2: position > 9
+    // Case 2: position > 9 (modifierPressed=true to isolate the position guard)
     renderWithProviders(
       <Tabs value={null} onChange={() => {}} orientation="vertical">
         <Tabs.Tab value="card-10">
-          <SessionCard cardId="card-10" onRemove={vi.fn()} position={10} />
+          <SessionCard cardId="card-10" onRemove={vi.fn()} position={10} modifierPressed={true} />
         </Tabs.Tab>
       </Tabs>,
     );
@@ -569,5 +585,105 @@ describe("SessionCard", () => {
     expect(screen.queryByText(/—/)).toBeNull();
     // Slug must still render
     expect(screen.getByText("no-repo-no-branch")).toBeInTheDocument();
+  });
+
+  // ── Badge-slot height tests (Step 8) ──────────────────────────────────────
+
+  it("badge slot is always rendered even when no badges are present", () => {
+    // Fixture 3: no prNumber, no issueNumber
+    const { container } = renderInTabs(CARD_ID_F3);
+    const slot = container.querySelector('[data-testid="badge-slot"]');
+    expect(slot).not.toBeNull();
+    expect(screen.queryByRole("img", { name: "Pull request" })).toBeNull();
+    expect(screen.queryByRole("img", { name: "Issue" })).toBeNull();
+  });
+
+  it("badge slot is rendered when badges are present", () => {
+    // Fixture 0: prNumber=42, issueNumber=17
+    const { container } = renderInTabs(CARD_ID_F0);
+    const slot = container.querySelector('[data-testid="badge-slot"]');
+    expect(slot).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Pull request" })).toBeInTheDocument();
+  });
+
+  it("badge slot reserves constant height whether or not PR/issue badges are present", () => {
+    // Fixture 3: no badges
+    const { container: containerNoBadges } = renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F3}>
+          <SessionCard cardId={CARD_ID_F3} onRemove={vi.fn()} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    const slotNoBadges = containerNoBadges.querySelector('[data-testid="badge-slot"]');
+    expect(slotNoBadges).not.toBeNull();
+    expect((slotNoBadges as HTMLElement).style.minHeight).not.toBe("");
+
+    // Fixture 0: has badges
+    const { container: containerWithBadges } = renderWithProviders(
+      <Tabs value={null} onChange={() => {}} orientation="vertical">
+        <Tabs.Tab value={CARD_ID_F0}>
+          <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} />
+        </Tabs.Tab>
+      </Tabs>,
+    );
+    const slotWithBadges = containerWithBadges.querySelector('[data-testid="badge-slot"]');
+    expect(slotWithBadges).not.toBeNull();
+    expect((slotWithBadges as HTMLElement).style.minHeight).not.toBe("");
+  });
+
+  // ── Close button hover-reveal tests (Step 9) ──────────────────────────────
+
+  describe("close button hover-reveal", () => {
+    it('outer Box has data-hovered="false" by default', () => {
+      const { container } = renderInTabs(CARD_ID_F0);
+      const card = container.querySelector("[data-active]") as Element;
+      expect(card.getAttribute("data-hovered")).toBe("false");
+    });
+
+    it('outer Box has data-hovered="true" after hovering the card', () => {
+      const { container } = renderInTabs(CARD_ID_F0);
+      const card = container.querySelector("[data-active]") as Element;
+      // Use fireEvent.mouseEnter to trigger the React onMouseEnter handler directly,
+      // bypassing user-event's pointer-event checks (the absolutely-positioned close
+      // button has pointer-events:none which would block user.hover traversal).
+      fireEvent.mouseEnter(card);
+      expect(card.getAttribute("data-hovered")).toBe("true");
+    });
+
+    it('outer Box has data-hovered="false" after unhovering the card', () => {
+      const { container } = renderInTabs(CARD_ID_F0);
+      const card = container.querySelector("[data-active]") as Element;
+      fireEvent.mouseEnter(card);
+      expect(card.getAttribute("data-hovered")).toBe("true");
+      fireEvent.mouseLeave(card);
+      expect(card.getAttribute("data-hovered")).toBe("false");
+    });
+
+    it("close button becomes visible on keyboard focus (data-hovered=true)", () => {
+      const { container } = renderInTabs(CARD_ID_F0);
+      const card = container.querySelector("[data-active]") as Element;
+      const btn = screen.getByRole("button", { name: /Remove card/ });
+      fireEvent.focus(btn);
+      expect(card.getAttribute("data-hovered")).toBe("true");
+      fireEvent.blur(btn);
+      expect(card.getAttribute("data-hovered")).toBe("false");
+    });
+
+    it("close button is keyboard-activatable when hidden by default", async () => {
+      const onRemove = vi.fn();
+      const user = userEvent.setup();
+      renderWithProviders(
+        <Tabs value={null} onChange={() => {}} orientation="vertical">
+          <Tabs.Tab value={CARD_ID_F0}>
+            <SessionCard cardId={CARD_ID_F0} onRemove={onRemove} />
+          </Tabs.Tab>
+        </Tabs>,
+      );
+      const btn = screen.getByRole("button", { name: /Remove card/ });
+      btn.focus();
+      await user.keyboard("{Enter}");
+      expect(onRemove).toHaveBeenCalledTimes(1);
+    });
   });
 });

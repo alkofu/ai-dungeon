@@ -475,6 +475,47 @@ describe("AppLayout — keyboard navigation", () => {
     expect(onActiveIdChange).not.toHaveBeenCalled();
   });
 
+  it("holding Meta for 250ms shows ⌘1/⌘2/⌘3 on 3 cards; releasing hides them", async () => {
+    // Mirror the pattern from useModifierHeld.test.ts (which passes):
+    // use fake timers, dispatch to window, advance via act+advanceTimersByTime.
+    vi.useFakeTimers();
+    try {
+      // Render with fake timers active so React internals and the hook all use
+      // the same fake time base. Wrap in act so effects flush synchronously.
+      await act(async () => {
+        renderLayout(threeCards, "A");
+      });
+
+      // Before any keypress, no chips are rendered (modifier not held).
+      expect(screen.queryByText(/^⌘/)).toBeNull();
+
+      // In jsdom the navigator does not identify as macOS, so isMacPlatform()
+      // returns false inside useModifierHeld, meaning the watched key is
+      // "Control" (not "Meta"). Dispatch Control keydown.
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", bubbles: true }));
+
+      // Advance past the 250ms threshold; act() flushes the React re-render
+      // triggered by setPressed(true) inside the hook's timer callback.
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Chips should now be visible (modifierPressed=true) on all three cards.
+      // The SHORTCUT_GLYPH is "⌘" because isMacPlatform is mocked to true at
+      // module load time for SessionCard.tsx; the hook separately uses the
+      // real navigator to decide which key to watch (Control in jsdom).
+      expect(screen.getAllByText(/^⌘/)).toHaveLength(3);
+
+      // Dispatch Control keyup — chips disappear immediately.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent("keyup", { key: "Control", bubbles: true }));
+      });
+      expect(screen.queryByText(/^⌘/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("hotkey fires while a textarea is focused (tagsToIgnore: [] override)", async () => {
     const { onActiveIdChange, user } = renderLayout(threeCards, "B");
 
