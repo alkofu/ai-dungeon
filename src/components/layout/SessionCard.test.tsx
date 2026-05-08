@@ -673,17 +673,53 @@ describe("SessionCard", () => {
     it("close button is keyboard-activatable when hidden by default", async () => {
       const onRemove = vi.fn();
       const user = userEvent.setup();
-      renderWithProviders(
+      const { container } = renderWithProviders(
         <Tabs value={null} onChange={() => {}} orientation="vertical">
           <Tabs.Tab value={CARD_ID_F0}>
             <SessionCard cardId={CARD_ID_F0} onRemove={onRemove} />
           </Tabs.Tab>
         </Tabs>,
       );
+      const card = container.querySelector("[data-active]") as Element;
+      // Precondition: confirms the "when hidden by default" part of the test name.
+      expect(card.getAttribute("data-hovered")).toBe("false");
       const btn = screen.getByRole("button", { name: /Remove card/ });
       btn.focus();
       await user.keyboard("{Enter}");
       expect(onRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it("keyboard Tab into card reveals the close button via focus handler", async () => {
+      const user = userEvent.setup();
+      const { container } = renderWithProviders(
+        <div>
+          {/* Sentinel focusable element so Tab has somewhere to start from */}
+          <button type="button">sentinel</button>
+          <Tabs value={null} onChange={() => {}} orientation="vertical">
+            <Tabs.Tab value={CARD_ID_F0}>
+              <SessionCard cardId={CARD_ID_F0} onRemove={vi.fn()} />
+            </Tabs.Tab>
+          </Tabs>
+        </div>,
+      );
+
+      const card = container.querySelector("[data-active]") as Element;
+      // Precondition: no interaction has occurred yet.
+      expect(card.getAttribute("data-hovered")).toBe("false");
+
+      // Tab past the sentinel and any intervening focusable elements until we
+      // land on the close button (aria-label matches "Remove card …").
+      const closeBtn = screen.getByRole("button", { name: /Remove card/ });
+      let tabCount = 0;
+      while (document.activeElement !== closeBtn && tabCount < 20) {
+        await user.tab();
+        tabCount++;
+      }
+      expect(document.activeElement).toBe(closeBtn);
+
+      // Once the close button has focus, the onFocus handler must have fired
+      // and flipped hovered to true, making the button visible.
+      expect(card.getAttribute("data-hovered")).toBe("true");
     });
   });
 });

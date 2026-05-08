@@ -9,6 +9,9 @@ import { isMacPlatform } from "./useModifierHeld";
 // Ctrl+ includes the + per Windows/Linux convention. Labels become ⌘1 and Ctrl+1.
 const SHORTCUT_GLYPH = isMacPlatform() ? "⌘" : "Ctrl+";
 
+/** Horizontal padding reserved for the absolutely-positioned close button (ActionIcon size="xs" ≈ 22px + spacing.sm ≈ 8px). */
+const CLOSE_BUTTON_RESERVE_PX = 28;
+
 function isSessionContext(m: SessionContext | ShellContext): m is SessionContext {
   return "slug" in m && typeof (m as SessionContext).slug === "string";
 }
@@ -138,10 +141,10 @@ export function SessionCard({
             )}
           </Stack>
           {/* Shortcut chip — modifier-gated: visible only when modifier is held for 250ms.
-              pr=28 reserves space for the absolutely-positioned close button (Step 9)
+              pr=CLOSE_BUTTON_RESERVE_PX reserves space for the absolutely-positioned close button (Step 9)
               so it does not overlap the chip when both are visible. */}
           {showShortcutChip && (
-            <Group gap="xs" pr={28}>
+            <Group gap="xs" pr={CLOSE_BUTTON_RESERVE_PX}>
               <Box
                 px={8}
                 py={2}
@@ -175,6 +178,8 @@ export function SessionCard({
           variant="subtle"
           size="xs"
           tabIndex={0}
+          // Load-bearing for keyboard a11y: focus reveals the close button so it is
+          // visible when interacted with via keyboard. Do not decouple from `hovered` state.
           onFocus={() => setHovered(true)}
           onBlur={() => setHovered(false)}
           style={{
