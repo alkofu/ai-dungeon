@@ -180,6 +180,31 @@ describe("NavbarResizer — pointer drag", () => {
     unmount();
     expect(document.body.classList.contains("is-resizing")).toBe(false);
   });
+
+  it("defers 'is-resizing' removal to a RAF (class still present synchronously after pointerUp)", () => {
+    // Override the default synchronous RAF stub with one that captures
+    // the callback but does NOT invoke it — so we can assert the class
+    // is still present immediately after pointerUp.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length; // handle (unused)
+    };
+
+    renderResizer({ width: 250 });
+    const sep = screen.getByRole("separator");
+
+    fireEvent.pointerDown(sep, { pointerId: 1, clientX: 250, buttons: 1 });
+    fireEvent.pointerUp(sep, { pointerId: 1, clientX: 300 });
+
+    // Synchronously after pointerUp the class must still be set (RAF not yet run).
+    expect(document.body.classList.contains("is-resizing")).toBe(true);
+    expect(rafCallbacks).toHaveLength(1);
+
+    // Flushing the RAF removes the class.
+    rafCallbacks[0]!(0);
+    expect(document.body.classList.contains("is-resizing")).toBe(false);
+  });
 });
 
 describe("NavbarResizer — keyboard", () => {

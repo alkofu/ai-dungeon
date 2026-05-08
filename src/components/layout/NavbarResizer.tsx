@@ -113,7 +113,12 @@ export function NavbarResizer({
     // The useEffect cleanup below removes the class synchronously on unmount,
     // so an in-flight RAF that fires after unmount is a harmless no-op.
     requestAnimationFrame(() => {
-      document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
+      // Guard against a new drag starting before this RAF fires.
+      // If draggingRef is true, the new drag's pointerDown has already
+      // re-set the class; do not clear it.
+      if (!draggingRef.current) {
+        document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
+      }
     });
     // aria-valuenow will be set correctly by React on the next render after
     // onCommit triggers setLiveWidth(final) in the parent.
