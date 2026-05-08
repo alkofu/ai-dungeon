@@ -105,8 +105,16 @@ export function NavbarResizer({
     if (!draggingRef.current) return;
     draggingRef.current = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
-    document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
     onCommit(currentWidthRef.current);
+    // Defer class removal to the next animation frame so the add (pointerDown)
+    // and remove are always in separate tasks. If they land in the same task,
+    // the MutationObserver batches them to a net-zero change and the
+    // falling-edge wasResizing guard in Terminal.tsx never fires.
+    // The useEffect cleanup below removes the class synchronously on unmount,
+    // so an in-flight RAF that fires after unmount is a harmless no-op.
+    requestAnimationFrame(() => {
+      document.body.classList.remove("is-resizing"); // sentinel read by Terminal.tsx's ResizeObserver gate
+    });
     // aria-valuenow will be set correctly by React on the next render after
     // onCommit triggers setLiveWidth(final) in the parent.
   }

@@ -67,6 +67,11 @@ describe("NavbarResizer — pointer drag", () => {
     // jsdom does not implement setPointerCapture — stub it on the prototype.
     window.HTMLElement.prototype.setPointerCapture = setPointerCaptureMock;
     window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+    // Make RAF synchronous so body-class removal assertions work without async flushing.
+    window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    };
   });
 
   afterEach(() => {
