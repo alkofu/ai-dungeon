@@ -283,11 +283,13 @@ export function Terminal({
     // called yet, so the renderer does not exist.
     //
     // A second fitAddon.fit() is called immediately after term.open() (see the
-    // font-load IIFE below). That second call is REQUIRED: ResizeObserver does
-    // not self-fire when the container has not changed size between the
-    // observer.observe() call (above) and term.open() completing. Without the
-    // post-open fit(), the terminal renderer starts with the wrong dimensions
-    // and the PTY viewport is never correctly sized on initial mount.
+    // font-load IIFE below). That second call is REQUIRED. In real browsers,
+    // ResizeObserver does not self-fire when the container has not changed size
+    // between the observer.observe() call (above) and term.open() completing.
+    // (jsdom's ResizeObserver mock may fire eagerly on observe() — the post-open
+    // fit() is still required regardless.) Without the post-open fit(), the
+    // terminal renderer starts with the wrong dimensions and the PTY viewport is
+    // never correctly sized on initial mount.
     fitAddon.fit();
 
     // ── ResizeObserver ────────────────────────────────────────────────────────

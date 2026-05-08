@@ -352,13 +352,17 @@ describe("Terminal", () => {
     // (immediately after term.open()) must have fired.
     expect(fitInstance.fit.mock.calls.length).toBeGreaterThanOrEqual(2);
 
-    // The second fit() must have been called AFTER term.open():
+    // At least one fit() call must have been made AFTER term.open().
     // invocationCallOrder is a monotonically increasing integer assigned by
     // Vitest to each mock call globally — a higher number means a later call.
+    // We use .some() rather than checking a fixed index because jsdom's
+    // ResizeObserver mock fires eagerly on observer.observe(), producing an
+    // intermediate fit() call between the pre-open fit() and term.open(). The
+    // total number of fit() calls is therefore 3+ in the test environment, and
+    // the post-open fit() is not at a fixed index.
     const openOrder = termInstance.open.mock.invocationCallOrder[0];
-    // The first fit() is pre-open; the second fit() is post-open.
-    const secondFitOrder = fitInstance.fit.mock.invocationCallOrder[1];
-    expect(secondFitOrder).toBeGreaterThan(openOrder);
+    const fitOrders = fitInstance.fit.mock.invocationCallOrder;
+    expect(fitOrders.some((o: number) => o > openOrder)).toBe(true);
   });
 
   it("calls pty_resize when ResizeObserver fires after spawn is ready", async () => {
