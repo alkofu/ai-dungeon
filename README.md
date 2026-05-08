@@ -79,6 +79,16 @@ To preview a specific git worktree without manually `cd`-ing into it, use `pnpm 
 
 See [TESTING.md](TESTING.md) for the full guide, including setup, configuration decisions, and coverage.
 
+### Prerequisites
+
+Before running `pnpm test:e2e`, contributors must install the Chromium browser binary:
+
+```
+npx playwright install chromium
+```
+
+See [TESTING.md § E2E Tests](TESTING.md#e2e-tests-playwright) for the full rationale.
+
 | Command         | What it runs                                       |
 | --------------- | -------------------------------------------------- |
 | `pnpm test`     | Vitest — unit and component tests (single run)     |

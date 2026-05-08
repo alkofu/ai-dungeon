@@ -25,18 +25,17 @@
  *   5. Run `locale` — LC_CTYPE and LC_ALL both contain UTF-8.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures/app-fixtures";
 
 test.describe("MesloLGS NF font loading", () => {
-  test("MesloLGS NF is loaded in document.fonts after a terminal card mounts", async ({ page }) => {
+  test("MesloLGS NF is loaded in document.fonts after a terminal card mounts", async ({
+    page,
+    addTerminalCard,
+  }) => {
     await page.goto("/");
 
     // Add a card so a <Terminal> component mounts and triggers font loading.
-    await page.getByRole("button", { name: "Add card menu" }).click();
-    await page.getByRole("menuitem", { name: "Terminal" }).click();
-
-    // Wait for the terminal root to appear, confirming the component mounted.
-    await page.waitForSelector('[data-testid="terminal-root"]');
+    await addTerminalCard(page);
 
     // Primary assertion: MesloLGS NF must be fully loaded at the target font
     // size (13px — matches the fontSize passed to the XTerm constructor).
